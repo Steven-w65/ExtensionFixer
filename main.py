@@ -891,8 +891,8 @@ class FileOperations:
 class ExtensionRepairApp:
     """Tkinter UI layer for the Magic Number File Extension Repair Tool."""
 
-    APP_TITLE = "Magic Number Intelligent File Extension Repair Tool"
-    VERSION = "Version 1.0"
+    APP_TITLE = "Suffix Fixer"
+    VERSION = "Version 1.0.1"
     STRATEGY_LABELS = {
         1: "1 - Auto append serial number",
         2: "2 - Skip when duplicate name exists",
