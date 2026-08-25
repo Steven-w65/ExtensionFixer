@@ -1,4 +1,4 @@
-# Magic Number Intelligent File Extension Repair Tool
+# Suffix Fixer
 
 <p align="center">
   <strong>A safe, local Tkinter utility for repairing incorrect file extensions from binary magic numbers.</strong>
