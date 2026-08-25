@@ -1,138 +1,204 @@
-# Extension Fixer
+# 🛠️ Extension Fixer
 
 <p align="center">
-<strong>A safe, local desktop utility that detects and repairs incorrect file extensions using binary magic numbers.</strong>
+  <strong>A safe, lightweight desktop tool for detecting and repairing incorrect file extensions using binary magic numbers.</strong>
 </p>
 
 <p align="center">
-<img src="https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white">
-<img src="https://img.shields.io/badge/GUI-Tkinter-4A90A4">
-<img src="https://img.shields.io/badge/Dependencies-None-2E8B57">
-<img src="https://img.shields.io/badge/Scanner-Threaded-success">
-<img src="https://img.shields.io/badge/Results-Live%20Updates-blue">
-<img src="https://img.shields.io/badge/Repair-Safe%20Rename-orange">
-<img src="https://img.shields.io/badge/File%20Content-Never%20Modified-C75B4A">
+  <img src="https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white">
+  <img src="https://img.shields.io/badge/GUI-Tkinter-4A90A4">
+  <img src="https://img.shields.io/badge/Dependencies-None-2E8B57">
+  <img src="https://img.shields.io/badge/Scanner-Threaded-success">
+  <img src="https://img.shields.io/badge/Results-Live%20Updates-blue">
+  <img src="https://img.shields.io/badge/Repair-Safe%20Rename-orange">
 </p>
 
 ---
 
-## Introduction
+## ✨ Overview
 
-Extension Fixer identifies files using binary magic numbers instead of trusting filenames. It detects incorrect extensions and safely repairs filenames without modifying file contents.
+Files can lose their correct extensions because of accidental renaming, failed transfers, or software issues.
 
-A file named `photo.tmp` may still be a PNG image, or `document.bin` may actually be a PDF. Extension Fixer helps recover these files through content-based detection.
+A file named:
 
-### Core Principles
+```
+photo.tmp
+```
 
-- Detect files using binary signatures.
-- Rename files only; never modify file contents.
-- Keep the UI responsive during large scans.
-- Require user selection before repair.
-- Provide backup and undo support.
+may actually be:
 
----
+```
+photo.png
+```
 
-## Features
+Extension Fixer identifies the real file type by analyzing binary signatures (**magic numbers**) instead of trusting the filename.
 
-| Feature | Description |
-|---|---|
-| Magic-number detection | Reads the first 16 bytes to identify supported formats. |
-| Background scanner | Uses a worker thread for large folders. |
-| Live scan results | Displays results while scanning. |
-| Stop and restart scanning | Safely cancel and restart scans. |
-| Stable selection | Checkbox selections are tracked by file path. |
-| Preview repairs | Review changes before execution. |
-| Safe repair | Conflict checks, backups, and undo history. |
-| CSV reports | Export to `extensionfixer_report.csv`. |
-| DPI-aware UI | Supports different display scaling. |
-| No dependencies | Uses Python standard library only. |
+It then allows you to safely repair the filename extension while keeping the original file content untouched.
 
 ---
 
-## Quick Start
+# 🚀 Highlights
 
-Requirements:
+| | Feature |
+|-|-|
+| 🔍 | Magic-number based file detection |
+| ⚡ | Background threaded scanning |
+| 📋 | Live scan result updates |
+| ☑️ | Stable checkbox selection |
+| 👀 | Preview before repair |
+| 🛡️ | Backup and undo support |
+| 📄 | CSV reporting |
+| 🖥️ | DPI-aware interface |
+| 📦 | No external dependencies |
+
+---
+
+# 🔄 How It Works
+
+```
+Select Folder
+      │
+      ▼
+Scan Files
+      │
+      ▼
+Read Magic Number
+(first 16 bytes)
+      │
+      ▼
+Compare Extension
+      │
+      ▼
+Review Results
+      │
+      ▼
+Select Files
+      │
+      ▼
+Preview Repair
+      │
+      ▼
+Rename Safely
+```
+
+---
+
+# ⭐ Key Features
+
+## ⚡ Responsive Large Folder Scanning
+
+Extension Fixer uses a background worker thread to keep the interface responsive.
+
+Benefits:
+
+- Scan large folders without freezing the UI
+- View results while scanning continues
+- Stop and restart scans safely
+- Incrementally update results
+
+---
+
+## ☑️ Reliable File Selection
+
+The result table uses file-path based selection tracking.
+
+This prevents common issues:
+
+✅ Selection lost after refresh  
+✅ Wrong files selected after sorting/filtering  
+✅ Long-list selection instability  
+
+Selecting files only updates the affected row instead of rebuilding the entire table.
+
+---
+
+## 🛡️ Safe Repair Workflow
+
+Repairs are designed to minimize risk:
+
+- File contents are never modified
+- Only filenames are changed
+- Conflicts are checked before renaming
+- Optional backups are available
+- Undo history is recorded
+
+---
+
+# 📸 Interface
+
+Main workflow:
+
+```
+┌──────────────────────────────┐
+│ Folder Selection              │
+│ [Select Folder] [Scan Files]  │
+└──────────────────────────────┘
+
+┌──────────────────────────────┐
+│ Scan Results                  │
+│ ☑ File   Current   Detected   │
+│                              │
+└──────────────────────────────┘
+
+┌──────────────┐ ┌────────────┐
+│ Operation Log│ │  Actions   │
+│              │ │ Preview    │
+│              │ │ Repair     │
+│              │ │ Undo       │
+└──────────────┘ └────────────┘
+```
+
+---
+
+# 📦 Installation
+
+## Requirements
 
 - Python 3.9+
 - Tkinter enabled
 
-Run:
+## Run
 
 ```bash
 python main.py
 ```
 
+No package installation required.
+
 ---
 
-## Workflow
+# 📝 Workflow
 
-1. Select a folder.
-2. Configure settings.
+1. Select a target folder.
+2. Configure scan settings.
 3. Click **Scan Files**.
-4. Review results.
-5. Select files with checkboxes.
+4. Review detected problems.
+5. Select files using checkboxes.
 6. Click **Preview Repairs**.
 7. Confirm **Execute Repair**.
-8. Use undo if restoration is needed.
+8. Restore changes with **Undo Recorded Changes** if required.
 
 ---
 
-## Selection System
-
-The result table uses file-path based selection tracking.
-
-Benefits:
-
-- Selecting files does not refresh the table.
-- Large lists remain easy to manage.
-- Selection survives table refreshes and filtering.
-- Repair actions only affect selected files.
-
----
-
-## Performance
-
-Extension Fixer improves large-folder handling by:
-
-- Running scans in a background thread.
-- Using queue-based GUI updates.
-- Streaming directory traversal.
-- Updating results incrementally.
-- Avoiding unnecessary table rebuilds.
-
----
-
-## Safety
-
-The application:
-
-- Never modifies binary file contents.
-- Only renames files during repair.
-- Checks conflicts before changes.
-- Supports backups.
-- Records operations for undo.
-
----
-
-## Configuration Files
+# ⚙️ Configuration
 
 | File | Purpose |
-|---|---|
-| `settings.json` | Application settings. |
-| `custom_magic_formats.json` | Magic-number definitions. |
-| `operation_log.json` | Undo records. |
+|-|-|
+| `settings.json` | Application preferences |
+| `custom_magic_formats.json` | File signature definitions |
+| `operation_log.json` | Undo history |
 
 ---
 
-## CSV Report
+# 📊 CSV Reports
 
-Default export filename:
+Reports are exported as:
 
-```text
+```
 extensionfixer_report.csv
 ```
 
-Contains:
+Includes:
 
 - File path
 - Current extension
@@ -143,7 +209,19 @@ Contains:
 
 ---
 
-## Project Structure
+# 🔧 Performance Design
+
+Large scans are optimized through:
+
+- Threaded scanning
+- Queue-based UI communication
+- Streaming directory traversal
+- Incremental table updates
+- Reduced unnecessary refresh operations
+
+---
+
+# 📁 Project Structure
 
 ```text
 .
@@ -156,6 +234,19 @@ Contains:
 
 ---
 
-## License
+# 🧪 Development Guidelines
+
+When contributing:
+
+- Keep the project dependency-free
+- Preserve rename-only repairs
+- Never modify file contents
+- Maintain threaded scanning behavior
+- Keep selection tracking path-based
+- Test scan, stop, restart, repair, undo, and export workflows
+
+---
+
+# 📜 License
 
 MIT
