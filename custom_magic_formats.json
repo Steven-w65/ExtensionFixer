@@ -118,6 +118,21 @@
       "extension": "psd",
       "offset": 0,
       "signature_hex": "38425053"
+    },
+    {
+      "extension": "gz",
+      "offset": 0,
+      "signature_hex": "1F8B08"
+    },
+    {
+      "extension": "mp3",
+      "offset": 0,
+      "signature_hex": "494433"
+    },
+    {
+      "extension": "flac",
+      "offset": 0,
+      "signature_hex": "664C6143"
     }
   ]
 }
