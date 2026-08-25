@@ -1,172 +1,151 @@
 # Extension Fixer
 
-```{=html}
 <p align="center">
-```
-`<strong>`{=html}A safe, local Tkinter utility for detecting incorrect
-file extensions and repairing filenames using binary magic
-numbers.`</strong>`{=html}
-```{=html}
+<strong>A safe, local desktop utility that detects and repairs incorrect file extensions using binary magic numbers.</strong>
 </p>
-```
-## What it does
 
-Extension Fixer scans files, reads the first 16 bytes to identify known
-binary formats, and compares the detected format with the current
-filename extension.
+<p align="center">
+<img src="https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white">
+<img src="https://img.shields.io/badge/GUI-Tkinter-4A90A4">
+<img src="https://img.shields.io/badge/Dependencies-None-2E8B57">
+<img src="https://img.shields.io/badge/Scanner-Threaded-success">
+<img src="https://img.shields.io/badge/Results-Live%20Updates-blue">
+<img src="https://img.shields.io/badge/Repair-Safe%20Rename-orange">
+<img src="https://img.shields.io/badge/File%20Content-Never%20Modified-C75B4A">
+</p>
 
-The repair process only changes filenames. File contents are never
-modified.
+---
 
-Text-based files without reliable binary signatures are reported as
-unidentifiable.
+## Introduction
 
-## Current Features
+Extension Fixer identifies files using binary magic numbers instead of trusting filenames. It detects incorrect extensions and safely repairs filenames without modifying file contents.
 
-  -----------------------------------------------------------------------
-  Feature                             Description
-  ----------------------------------- -----------------------------------
-  Magic-number detection              Reads only the first 16 bytes of
-                                      files.
+A file named `photo.tmp` may still be a PNG image, or `document.bin` may actually be a PDF. Extension Fixer helps recover these files through content-based detection.
 
-  Configurable formats                Magic-number rules are stored in
-                                      `custom_magic_formats.json`.
+### Core Principles
 
-  Background scanning                 Large scans run in a worker thread
-                                      to keep the UI responsive.
+- Detect files using binary signatures.
+- Rename files only; never modify file contents.
+- Keep the UI responsive during large scans.
+- Require user selection before repair.
+- Provide backup and undo support.
 
-  Live scan results                   Results are added while scanning
-                                      instead of waiting for the entire
-                                      scan to finish.
+---
 
-  Stop and restart scanning           Active scans can be stopped and a
-                                      new scan can be started safely.
+## Features
 
-  Stable file selection               Checkbox selections are tracked by
-                                      file path, so selections remain
-                                      correct after refresh/filter
-                                      operations.
+| Feature | Description |
+|---|---|
+| Magic-number detection | Reads the first 16 bytes to identify supported formats. |
+| Background scanner | Uses a worker thread for large folders. |
+| Live scan results | Displays results while scanning. |
+| Stop and restart scanning | Safely cancel and restart scans. |
+| Stable selection | Checkbox selections are tracked by file path. |
+| Preview repairs | Review changes before execution. |
+| Safe repair | Conflict checks, backups, and undo history. |
+| CSV reports | Export to `extensionfixer_report.csv`. |
+| DPI-aware UI | Supports different display scaling. |
+| No dependencies | Uses Python standard library only. |
 
-  Preview before repair               Review selected files before
-                                      changing names.
-
-  Safe repair                         Conflict checks, optional backups,
-                                      and undo history are provided.
-
-  Undo support                        Restore previous filename changes
-                                      using recorded operations.
-
-  CSV reports                         Export scan results to
-                                      `extensionfixer_report.csv`.
-
-  DPI-aware UI                        The interface adapts better to
-                                      different Windows display scaling
-                                      settings.
-
-  No dependencies                     Uses only Python standard library
-                                      modules.
-  -----------------------------------------------------------------------
+---
 
 ## Quick Start
 
-### Requirements
+Requirements:
 
--   Python 3.9 or newer
--   Tkinter enabled
+- Python 3.9+
+- Tkinter enabled
 
-### Run
+Run:
 
-``` bash
+```bash
 python main.py
 ```
 
-## Typical Workflow
+---
 
-1.  Select a folder.
-2.  Configure options in **Settings** if needed.
-3.  Click **Scan Files**.
-4.  Review scan results.
-5.  Select files using the checkboxes.
-6.  Click **Preview Repairs**.
-7.  Click **Execute Repair** after confirmation.
-8.  Use **Undo Recorded Changes** if restoration is required.
+## Workflow
 
-## Interface
+1. Select a folder.
+2. Configure settings.
+3. Click **Scan Files**.
+4. Review results.
+5. Select files with checkboxes.
+6. Click **Preview Repairs**.
+7. Confirm **Execute Repair**.
+8. Use undo if restoration is needed.
 
-### Scan Results
+---
 
-The results table shows:
+## Selection System
 
--   File name
--   Current extension
--   Detected extension
--   Status
--   Checkbox selection
+The result table uses file-path based selection tracking.
 
-Important: - Preview and Repair actions require selected files. -
-Selecting files does not rebuild the table, allowing stable selection in
-large lists.
+Benefits:
+
+- Selecting files does not refresh the table.
+- Large lists remain easy to manage.
+- Selection survives table refreshes and filtering.
+- Repair actions only affect selected files.
+
+---
 
 ## Performance
 
-The application improves responsiveness by:
+Extension Fixer improves large-folder handling by:
 
--   Running scanning work outside the Tkinter UI thread.
--   Using queue-based communication between worker and GUI.
--   Streaming directory traversal.
--   Updating the table incrementally.
--   Avoiding full table refreshes during checkbox selection.
+- Running scans in a background thread.
+- Using queue-based GUI updates.
+- Streaming directory traversal.
+- Updating results incrementally.
+- Avoiding unnecessary table rebuilds.
 
-## Repair Safety
+---
+
+## Safety
 
 The application:
 
--   Never edits file contents.
--   Checks filename conflicts before renaming.
--   Supports optional backups.
--   Records operations for undo.
--   Handles errors per file.
+- Never modifies binary file contents.
+- Only renames files during repair.
+- Checks conflicts before changes.
+- Supports backups.
+- Records operations for undo.
+
+---
 
 ## Configuration Files
 
-  File                          Purpose
-  ----------------------------- --------------------------------------------
-  `settings.json`               User preferences and scan settings.
-  `custom_magic_formats.json`   Magic-number format definitions.
-  `operation_log.json`          Undo records generated by the application.
+| File | Purpose |
+|---|---|
+| `settings.json` | Application settings. |
+| `custom_magic_formats.json` | Magic-number definitions. |
+| `operation_log.json` | Undo records. |
 
-## Supported Format Configuration
-
-Formats are defined externally through `custom_magic_formats.json`.
-
-Each rule contains:
-
--   Extension name
--   Signature offset
--   Hexadecimal signature data
-
-Rules are checked in configuration order.
+---
 
 ## CSV Report
 
-The default report filename is:
+Default export filename:
 
-``` text
+```text
 extensionfixer_report.csv
 ```
 
-The report includes:
+Contains:
 
--   File path
--   Current extension
--   Detected extension
--   Size
--   Status
--   Repair information
+- File path
+- Current extension
+- Detected extension
+- File size
+- Status
+- Repair information
+
+---
 
 ## Project Structure
 
-``` text
+```text
 .
 ├── main.py
 ├── settings.json
@@ -175,16 +154,7 @@ The report includes:
 └── README.md
 ```
 
-## Development Notes
-
-When modifying the project:
-
--   Keep the dependency-free design.
--   Do not modify file binary content.
--   Preserve threaded scanning behavior.
--   Keep checkbox selection based on file paths.
--   Test scan, stop, restart, preview, repair, undo, and export
-    workflows.
+---
 
 ## License
 
