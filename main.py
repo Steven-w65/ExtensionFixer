@@ -7,6 +7,8 @@ import csv
 import sys
 import queue
 import threading
+import uuid
+import ctypes
 
 def get_resource_path(relative_path):
     if hasattr(sys, '_MEIPASS'):
@@ -1026,7 +1028,13 @@ class ExtensionRepairApp:
         self.scan_processed_count = 0
         self.scan_session_token = 0
         self.scan_stopped_by_user = False
+        self.stop_flush_pending = False
+        self.pending_terminal = None
         self.table_refresh_token = 0
+        self.max_pending_records = 500
+        self.checked_records = set()
+        self.select_all_var = tk.BooleanVar(value=False)
+        self.select_all_state = False
 
         self.folder_var = tk.StringVar(value=str(self.settings["last_folder"]))
         self.recursive_var = tk.BooleanVar(value=bool(self.settings["recursive_scan"]))
@@ -1052,50 +1060,36 @@ class ExtensionRepairApp:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _fit_window_to_screen(self):
-        """Use display-aware sizing so controls remain legible on 4K displays."""
+        """Use Windows DPI scaling and responsive sizing."""
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-        available_width = max(520, screen_width - 32)
-        available_height = max(460, screen_height - 90)
 
-        # Tk reports logical pixels on DPI-scaled Windows displays and physical
-        # pixels on others. Scale only when the reported desktop itself is
-        # larger than a conventional Full HD work area, avoiding double scaling.
-        resolution_scale = max(screen_width / 1920, screen_height / 1080)
-        self.ui_scale = min(1.5, max(1.0, resolution_scale))
+        self.ui_scale = 1.0
 
-        recommended_width = min(int(1180 * self.ui_scale), available_width)
-        recommended_height = min(int(780 * self.ui_scale), available_height)
+        available_width = max(800, screen_width - 40)
+        available_height = max(600, screen_height - 100)
 
         requested_width = self.settings.get("window_width", 1180)
         requested_height = self.settings.get("window_height", 780)
 
         try:
-            window_width = min(
-                max(int(760 * self.ui_scale), int(requested_width), recommended_width),
-                available_width
-            )
-            window_height = min(
-                max(int(560 * self.ui_scale), int(requested_height), recommended_height),
-                available_height
-            )
+            window_width = min(max(900, int(requested_width)), available_width)
+            window_height = min(max(600, int(requested_height)), available_height)
         except (TypeError, ValueError):
-            window_width = recommended_width
-            window_height = recommended_height
+            window_width = min(1180, available_width)
+            window_height = min(780, available_height)
 
         position_x = max(0, (screen_width - window_width) // 2)
         position_y = max(0, (screen_height - window_height) // 3)
 
         self.compact_layout = window_width < 1040
-        self.root.minsize(
-            min(int(760 * self.ui_scale), available_width),
-            min(int(560 * self.ui_scale), available_height)
-        )
+
+        self.root.minsize(800, 600)
         self.root.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
 
     def scaled(self, value):
-        """Return a DPI-friendly integer size for explicit Tk pixel values."""
-        return max(1, round(value * self.ui_scale))
+        """Tk handles DPI scaling; keep explicit sizes stable."""
+        return max(1, int(value))
 
     def collect_settings(self):
         """Collect every software preference; format rules stay in their own file."""
@@ -1147,59 +1141,59 @@ class ExtensionRepairApp:
         except tk.TclError:
             pass
 
-        self.root.configure(background="#F4F7FB")
-        body_font_size = self.scaled(9)
-        section_font_size = self.scaled(10)
+        self.root.configure(background="#F5F5F5")
+        body_font_size = self.scaled(10)
+        section_font_size = self.scaled(11)
 
         style.configure(
             "TFrame",
-            background="#F4F7FB"
+            background="#F5F5F5"
         )
         style.configure(
             "Card.TLabelframe",
-            background="#F4F7FB",
+            background="#F5F5F5",
             borderwidth=1,
             relief="solid"
         )
         style.configure(
             "Card.TLabelframe.Label",
-            background="#F4F7FB",
+            background="#F5F5F5",
             foreground="#38506B",
             font=("Segoe UI", section_font_size, "bold")
         )
         style.configure(
             "Title.TLabel",
-            background="#F4F7FB",
-            foreground="#1E3550",
-            font=("Segoe UI", self.scaled(16), "bold")
+            background="#F5F5F5",
+            foreground="#16324F",
+            font=("Segoe UI", self.scaled(18), "bold")
         )
         style.configure(
             "Version.TLabel",
-            background="#F4F7FB",
-            foreground="#7A8795",
+            background="#F5F5F5",
+            foreground="#607D9A",
             font=("Segoe UI", body_font_size)
         )
         style.configure(
             "TLabel",
-            background="#F4F7FB",
+            background="#F5F5F5",
             foreground="#34495E",
             font=("Segoe UI", body_font_size)
         )
         style.configure(
             "TCheckbutton",
-            background="#F4F7FB",
+            background="#F5F5F5",
             font=("Segoe UI", body_font_size)
         )
         style.configure(
             "TButton",
             font=("Segoe UI", body_font_size),
-            padding=(self.scaled(10), self.scaled(6))
+            padding=(8, 4)
         )
         style.configure(
             "Accent.TButton",
             foreground="white",
             background="#377DAB",
-            padding=(self.scaled(12), self.scaled(7))
+            padding=(8, 4)
         )
         style.map(
             "Accent.TButton",
@@ -1209,7 +1203,7 @@ class ExtensionRepairApp:
             "Danger.TButton",
             foreground="white",
             background="#C75B4A",
-            padding=(self.scaled(12), self.scaled(7))
+            padding=(8, 4)
         )
         style.map(
             "Danger.TButton",
@@ -1217,7 +1211,7 @@ class ExtensionRepairApp:
         )
         style.configure(
             "Treeview",
-            rowheight=self.scaled(28),
+            rowheight=self.scaled(32),
             font=("Segoe UI", body_font_size),
             background="#FFFFFF",
             fieldbackground="#FFFFFF",
@@ -1256,6 +1250,12 @@ class ExtensionRepairApp:
             text=self.APP_TITLE,
             style="Title.TLabel"
         ).grid(row=0, column=0, sticky="w")
+
+        ttk.Label(
+            title_frame,
+            text="Magic-number based extension repair tool",
+            style="Version.TLabel"
+        ).grid(row=1, column=0, sticky="w")
 
         ttk.Label(
             title_frame,
@@ -1298,11 +1298,17 @@ class ExtensionRepairApp:
 
         self.scan_button = ttk.Button(
             path_frame,
-            text="Scan Files",
+            text="▶  Scan Files",
             style="Accent.TButton",
             command=self.scan_files
         )
         self.scan_button.grid(row=0, column=4)
+
+        ttk.Button(
+            path_frame,
+            text="⟳ Refresh",
+            command=self.manual_refresh_table
+        ).grid(row=0, column=5, padx=(8, 0))
 
     def _build_table_panel(self, parent):
         table_frame = ttk.LabelFrame(
@@ -1316,6 +1322,7 @@ class ExtensionRepairApp:
         table_frame.columnconfigure(0, weight=1)
 
         columns = (
+            "select",
             "file_name",
             "current_extension",
             "detected_extension",
@@ -1328,12 +1335,15 @@ class ExtensionRepairApp:
             show="headings",
             selectmode="extended"
         )
+        self.tree.bind("<Button-1>", self.toggle_checkbox)
 
+        self.tree.heading("select", text="☐", command=self.toggle_all_checkbox)
         self.tree.heading("file_name", text="File Name (Relative Path)")
         self.tree.heading("current_extension", text="Current Extension")
         self.tree.heading("detected_extension", text="Detected Real Extension")
         self.tree.heading("status", text="Status")
 
+        self.tree.column("select", width=self.scaled(45), minwidth=self.scaled(45), anchor="center")
         self.tree.column("file_name", width=self.scaled(450), minwidth=self.scaled(220), anchor="w")
         self.tree.column("current_extension", width=self.scaled(135), minwidth=self.scaled(105), anchor="center")
         self.tree.column("detected_extension", width=self.scaled(165), minwidth=self.scaled(140), anchor="center")
@@ -1410,27 +1420,27 @@ class ExtensionRepairApp:
 
         ttk.Button(
             button_frame,
-            text="Export CSV Report",
+            text="↓ Export CSV Report",
             command=self.export_report
         ).grid(row=0, column=0, sticky="ew", pady=(0, 6))
 
         ttk.Button(
             button_frame,
-            text="Preview Repairs",
+            text="🔍 Preview Repairs",
             style="Accent.TButton",
             command=self.preview_repairs
         ).grid(row=1, column=0, sticky="ew", pady=6)
 
         ttk.Button(
             button_frame,
-            text="Execute Repair",
+            text="⚙ Execute Repair",
             style="Danger.TButton",
             command=self.execute_repairs
         ).grid(row=2, column=0, sticky="ew", pady=6)
 
         ttk.Button(
             button_frame,
-            text="Undo Recorded Changes",
+            text="↶ Undo Recorded Changes",
             command=self.undo_repairs
         ).grid(row=3, column=0, sticky="ew", pady=(6, 0))
 
@@ -1788,8 +1798,9 @@ class ExtensionRepairApp:
         self.scan_root_path = root_path
         self.scan_processed_count = 0
         self.scan_repair_count = 0
+        self.pending_table_refresh = False
         self.accept_scan_events = True
-        self.scan_event_queue = queue.Queue(maxsize=2000)
+        self.scan_event_queue = queue.Queue(maxsize=5000)
         self.scan_stop_event = threading.Event()
         worker = ScanWorker(
             scanner=self.scanner,
@@ -1807,46 +1818,61 @@ class ExtensionRepairApp:
             daemon=True,
         )
         self.scan_thread.start()
-        self.root.after(20, lambda: self.process_scan_events(scan_token))
+        self.root.after(100, lambda: self.process_scan_events(scan_token))
 
     def stop_scan(self):
-        """Stop the active scan while retaining results gathered so far."""
+        """Immediately cancel the active scan session."""
         if not self.scan_in_progress:
             return
 
-        # Invalidate queued UI callbacks and ask the worker to stop. The
-        # worker checks this event between records and never touches Tkinter.
-        self.accept_scan_events = False
-        self.scan_session_token += 1
         self.scan_stopped_by_user = True
+        self.scan_button.configure(state="disabled", text="Stopping...")
+        self.log("Stopping scan... cancelling current scan session.")
+
+        # Invalidate the current session immediately so late worker events
+        # cannot affect a future scan.
+        self.scan_session_token += 1
+        self.accept_scan_events = False
+
         if self.scan_stop_event is not None:
             self.scan_stop_event.set()
-        self.scan_iterator = None
+
+        # Drop queued events from the cancelled worker. The user requested a
+        # hard stop, not a drain/finish operation.
+        if self.scan_event_queue is not None:
+            try:
+                while True:
+                    self.scan_event_queue.get_nowait()
+            except queue.Empty:
+                pass
+
         self.scan_in_progress = False
-        self.refresh_table()
+        self.scan_thread = None
+        self.scan_stop_event = None
+        self.pending_table_refresh = False
+        self.pending_terminal = None
         self.reset_scan_button()
-        repair_count = sum(
-            1 for record in self.records
-            if record["status"] == "Repair required"
-        )
-        self.log(
-            f"Scan stopped: {len(self.records)} file(s) processed; "
-            f"{repair_count} file(s) require repair."
-        )
+        # Re-enable the scan button after a hard cancellation.
+        # reset_scan_button only restores command/text; it must not leave the
+        # primary action disabled.
+        self.scan_button.configure(state="normal")
+        # v11 uses a single toggle scan button; there is no separate stop_button widget.\n        self.scan_button.configure(state="normal")
+        self.log("Scan cancelled. Ready for a new scan.")
+
 
     def reset_scan_button(self):
         """Restore the primary scan action after scan completion or cancellation."""
         self.scan_button.configure(
-            text="Scan Files",
+            text="▶  Scan Files",
             style="Accent.TButton",
-            command=self.scan_files
+            command=self.scan_files,
+            state="normal"
         )
 
     def process_scan_events(self, scan_token):
         """Drain worker events in bounded batches on Tkinter's main thread."""
         if (
             scan_token != self.scan_session_token or
-            not self.accept_scan_events or
             self.scan_event_queue is None
         ):
             return
@@ -1866,7 +1892,9 @@ class ExtensionRepairApp:
             processed_events += 1
 
             if event_type == "record":
+                payload.setdefault("record_id", uuid.uuid4().hex)
                 self.records.append(payload)
+                self.pending_table_refresh = True
             elif event_type == "progress":
                 self.scan_processed_count = payload["processed"]
                 self.scan_repair_count = payload["repair_count"]
@@ -1877,11 +1905,11 @@ class ExtensionRepairApp:
             elif event_type == "log":
                 self.log(payload)
             elif event_type == "completed":
-                self.finish_scan(payload, stopped=False)
+                self.pending_terminal = (payload, False)
                 terminal_event = True
                 break
             elif event_type == "stopped":
-                self.finish_scan(payload, stopped=True)
+                self.pending_terminal = (payload, True)
                 terminal_event = True
                 break
             elif event_type == "error":
@@ -1891,8 +1919,25 @@ class ExtensionRepairApp:
                 terminal_event = True
                 break
 
+        if self.pending_table_refresh:
+            pending_count = len(self.records)
+            if pending_count >= self.max_pending_records:
+                self.pending_table_refresh = False
+                self.refresh_table()
+
+        # After worker termination, drain remaining queued events before final refresh.
+        if terminal_event and self.pending_terminal is not None:
+            remaining = not self.scan_event_queue.empty() if self.scan_event_queue else False
+            if remaining:
+                self.root.after(50, lambda: self.process_scan_events(scan_token))
+                return
+            summary, stopped = self.pending_terminal
+            self.pending_terminal = None
+            self.finish_scan(summary, stopped=stopped)
+            return
+
         if not terminal_event and self.scan_in_progress:
-            self.root.after(20, lambda: self.process_scan_events(scan_token))
+            self.root.after(100, lambda: self.process_scan_events(scan_token))
 
     def finish_scan(self, summary, stopped):
         """Finalize a worker scan after all relevant queue events are handled."""
@@ -1901,6 +1946,8 @@ class ExtensionRepairApp:
         self.scan_thread = None
         self.scan_stop_event = None
         self.reset_scan_button()
+        self.pending_table_refresh = False
+        self.stop_flush_pending = False
         self.refresh_table()
 
         processed_count = summary.get("processed", len(self.records))
@@ -1948,6 +1995,12 @@ class ExtensionRepairApp:
 
         return "warning"
 
+    def manual_refresh_table(self):
+        """Manually refresh visible scan results without restarting the scan."""
+        self.pending_table_refresh = False
+        self.refresh_table()
+        self.log("Scan results refreshed.")
+
     def refresh_table(self):
         """Rebuild large tables in small UI batches to avoid a render freeze."""
         self.table_refresh_token += 1
@@ -1956,6 +2009,7 @@ class ExtensionRepairApp:
             self.tree.delete(item_id)
 
         self.item_to_record = {}
+        self.update_select_all_header()
         self.table_record_iterator = iter(self.records)
         self.table_visible_index = 0
         self.root.after_idle(lambda: self.populate_table_chunk(refresh_token))
@@ -1976,6 +2030,7 @@ class ExtensionRepairApp:
                     "",
                     "end",
                     values=(
+                        "☑" if record.get("path") in self.checked_records else "☐",
                         record["relative_path"],
                         record["current_extension"] or "(none)",
                         record["detected_extension"] or "(unknown)",
@@ -1989,35 +2044,111 @@ class ExtensionRepairApp:
         except StopIteration:
             return
 
-        self.root.after(1, lambda: self.populate_table_chunk(refresh_token))
+        self.root.after_idle(lambda: self.populate_table_chunk(refresh_token))
+
+    def update_select_all_header(self):
+        """Keep the header checkbox synchronized with visible rows."""
+        visible_records = [
+            record for record in self.records
+            if self._record_visible(record)
+        ]
+
+        if visible_records and all(record.get("path") in self.checked_records for record in visible_records):
+            self.select_all_state = True
+            self.tree.heading("select", text="☑", command=self.toggle_all_checkbox)
+        else:
+            self.select_all_state = False
+            self.tree.heading("select", text="☐", command=self.toggle_all_checkbox)
+
+    def toggle_all_checkbox(self):
+        """Select or clear all currently visible scan result rows."""
+        visible_records = [
+            record for record in self.records
+            if self._record_visible(record)
+        ]
+
+        self.select_all_state = not self.select_all_state
+
+        if self.select_all_state:
+            self.checked_records.update(record.get("path") for record in visible_records)
+        else:
+            self.checked_records.difference_update(record.get("path") for record in visible_records)
+
+        # Update existing rows without rebuilding the table.
+        for item_id, record in self.item_to_record.items():
+            if record.get("path") in self.checked_records:
+                values = list(self.tree.item(item_id, "values"))
+                if values:
+                    values[0] = "☑"
+                    self.tree.item(item_id, values=values)
+            else:
+                values = list(self.tree.item(item_id, "values"))
+                if values:
+                    values[0] = "☐"
+                    self.tree.item(item_id, values=values)
+
+    def toggle_checkbox(self, event):
+        """Toggle row checkbox without affecting the existing scan logic."""
+        item_id = self.tree.identify_row(event.y)
+        column = self.tree.identify_column(event.x)
+
+        if not item_id or column != "#1":
+            return
+
+        record = self.item_to_record.get(item_id)
+        if record is None:
+            return
+
+        record_id = record.get("path")
+        if record_id in self.checked_records:
+            self.checked_records.remove(record_id)
+        else:
+            self.checked_records.add(record_id)
+
+        self.update_select_all_header()
+
+        # Update only the clicked row. Rebuilding the Treeview here causes
+        # scroll jumps and makes selecting many files unreliable.
+        current_values = list(self.tree.item(item_id, "values"))
+        if current_values:
+            current_values[0] = "☑" if record_id in self.checked_records else "☐"
+            self.tree.item(item_id, values=current_values)
+
+        return "break"
 
     def _get_selected_or_repair_records(self):
         """
-        Return selected repair rows when the user selected rows.
-        Otherwise return every repair-required record.
+        Return user-selected repair candidates only.
+
+        Selection is independent from repair status because the result table
+        allows users to inspect and select any scanned file.  Files that do
+        not need repair are intentionally ignored during repair operations.
+        This prevents accidental operations on normal/skipped files while
+        still allowing users to select mixed result rows.
         """
-        selected_items = self.tree.selection()
+        checked_records = [
+            record for record in self.records
+            if record.get("path") in self.checked_records
+        ]
 
-        if selected_items:
-            selected_records = [
-                self.item_to_record[item_id]
-                for item_id in selected_items
-                if item_id in self.item_to_record
-            ]
-
+        if checked_records:
             repair_records = [
-                record for record in selected_records
-                if record["status"] == "Repair required"
+                record for record in checked_records
+                if record.get("status") == "Repair required"
             ]
+
+            ignored_count = len(checked_records) - len(repair_records)
+            if ignored_count:
+                self.log(
+                    f"Ignored {ignored_count} selected file(s) because they "
+                    "do not require repair."
+                )
 
             return repair_records, True
 
-        repair_records = [
-            record for record in self.records
-            if record["status"] == "Repair required"
-        ]
-
-        return repair_records, False
+        # No checkbox selection means the user has not chosen any files.
+        # Do not silently fall back to every repair candidate.
+        return [], True
 
     def preview_repairs(self):
         """
@@ -2034,7 +2165,7 @@ class ExtensionRepairApp:
         if not records:
             messagebox.showinfo(
                 "Nothing to Preview",
-                "Select rows requiring repair, or scan files requiring repair first."
+                "Select files using the checkbox before previewing repairs."
             )
             return
 
@@ -2139,6 +2270,11 @@ class ExtensionRepairApp:
                 logger=self.log
             )
 
+            if result.get("renamed", 0) > 0:
+                self.checked_records.clear()
+                self.select_all_state = False
+                self.select_all_var.set(False)
+
             self.refresh_table()
 
             if result["message"]:
@@ -2185,7 +2321,7 @@ class ExtensionRepairApp:
         report_path = filedialog.asksaveasfilename(
             title="Export Scan Report",
             initialdir=initial_directory,
-            initialfile="magic_extension_scan_report.csv",
+            initialfile="extensionfixer_report.csv",
             defaultextension=".csv",
             filetypes=(("CSV Files", "*.csv"), ("All Files", "*.*"))
         )
@@ -2404,7 +2540,15 @@ class ExtensionRepairApp:
 
 
 def main():
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        scale_factor = ctypes.windll.shcore.GetScaleFactorForDevice(0)
+    except Exception:
+        scale_factor = 100
+
     root = tk.Tk()
+    root.tk.call("tk", "scaling", scale_factor / 75)
+
     icon_file = get_resource_path("app.ico")
     root.iconbitmap(icon_file)
     ExtensionRepairApp(root)
