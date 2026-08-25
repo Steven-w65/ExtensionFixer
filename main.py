@@ -28,8 +28,6 @@ class ApplicationSettings:
         "duplicate_strategy": 1,
         "max_size_mb": "1024",
         "suffix_blacklist": ".exe, .dll",
-        "window_width": 1180,
-        "window_height": 780,
     }
 
     def __init__(self, settings_path):
@@ -987,7 +985,7 @@ class ExtensionRepairApp:
     """Tkinter UI layer for the Magic Number File Extension Repair Tool."""
 
     APP_TITLE = "Extension Fixer"
-    VERSION = "Version 1.0.2"
+    VERSION = "Version 1.0.3"
     STRATEGY_LABELS = {
         1: "1 - Auto append serial number",
         2: "2 - Skip when duplicate name exists",
@@ -1013,7 +1011,6 @@ class ExtensionRepairApp:
         self.operations = FileOperations(Path.cwd() / "operation_log.json")
 
         self.records = []
-        self.item_to_record = {}
         self.scan_in_progress = False
         self.operation_in_progress = False
         self.confirmation_open = False
@@ -1050,6 +1047,7 @@ class ExtensionRepairApp:
 
         self._configure_style()
         self._build_ui()
+        self.update_action_buttons()
         loaded_formats, errors = self.detector.load_custom_formats()
 
         if loaded_formats:
@@ -1069,15 +1067,10 @@ class ExtensionRepairApp:
         available_width = max(800, screen_width - 40)
         available_height = max(600, screen_height - 100)
 
-        requested_width = self.settings.get("window_width", 1180)
-        requested_height = self.settings.get("window_height", 780)
-
-        try:
-            window_width = min(max(900, int(requested_width)), available_width)
-            window_height = min(max(600, int(requested_height)), available_height)
-        except (TypeError, ValueError):
-            window_width = min(1180, available_width)
-            window_height = min(780, available_height)
+        # Adaptive sizing: calculate the initial window from the current screen.
+        # User window dimensions are intentionally not stored in settings.json.
+        window_width = min(max(900, int(screen_width * 0.75)), available_width)
+        window_height = min(max(600, int(screen_height * 0.75)), available_height)
 
         position_x = max(0, (screen_width - window_width) // 2)
         position_y = max(0, (screen_height - window_height) // 3)
@@ -1101,8 +1094,6 @@ class ExtensionRepairApp:
             "duplicate_strategy": self.get_strategy_code(),
             "max_size_mb": self.size_limit_var.get().strip(),
             "suffix_blacklist": self.blacklist_var.get().strip(),
-            "window_width": self.root.winfo_width(),
-            "window_height": self.root.winfo_height(),
         }
 
     def save_settings(self):
@@ -1424,25 +1415,53 @@ class ExtensionRepairApp:
             command=self.export_report
         ).grid(row=0, column=0, sticky="ew", pady=(0, 6))
 
-        ttk.Button(
+        self.preview_button = ttk.Button(
             button_frame,
             text="🔍 Preview Repairs",
             style="Accent.TButton",
             command=self.preview_repairs
-        ).grid(row=1, column=0, sticky="ew", pady=6)
+        )
+        self.preview_button.grid(row=1, column=0, sticky="ew", pady=6)
 
-        ttk.Button(
+        self.repair_button = ttk.Button(
             button_frame,
             text="⚙ Execute Repair",
             style="Danger.TButton",
             command=self.execute_repairs
-        ).grid(row=2, column=0, sticky="ew", pady=6)
+        )
+        self.repair_button.grid(row=2, column=0, sticky="ew", pady=6)
 
         ttk.Button(
             button_frame,
             text="↶ Undo Recorded Changes",
             command=self.undo_repairs
         ).grid(row=3, column=0, sticky="ew", pady=(6, 0))
+
+    def update_action_buttons(self):
+        """Enable repair actions only when currently displayed files are selected.
+
+        Selection is stored by file path. Validate it against the current
+        records so stale selections from previous scans or refreshes cannot
+        incorrectly lock or unlock action buttons.
+        """
+        current_paths = {
+            record.get("path")
+            for record in self.records
+            if record.get("path")
+        }
+
+        active_selection = self.checked_records.intersection(current_paths)
+        has_selection = bool(active_selection)
+
+        if hasattr(self, "preview_button"):
+            self.preview_button.configure(
+                state="normal" if has_selection else "disabled"
+            )
+
+        if hasattr(self, "repair_button"):
+            self.repair_button.configure(
+                state="normal" if has_selection else "disabled"
+            )
 
     def log(self, message):
         """Append a message to the visible log panel."""
@@ -1783,7 +1802,6 @@ class ExtensionRepairApp:
             command=self.stop_scan
         )
         self.records = []
-        self.item_to_record = {}
         self.refresh_table()
 
         self.reload_custom_formats()
@@ -2008,7 +2026,6 @@ class ExtensionRepairApp:
         for item_id in self.tree.get_children():
             self.tree.delete(item_id)
 
-        self.item_to_record = {}
         self.update_select_all_header()
         self.table_record_iterator = iter(self.records)
         self.table_visible_index = 0
@@ -2029,6 +2046,7 @@ class ExtensionRepairApp:
                 item_id = self.tree.insert(
                     "",
                     "end",
+                    iid=record["path"],
                     values=(
                         "☑" if record.get("path") in self.checked_records else "☐",
                         record["relative_path"],
@@ -2039,7 +2057,6 @@ class ExtensionRepairApp:
                     tags=(self._record_tag(record, self.table_visible_index),)
                 )
 
-                self.item_to_record[item_id] = record
                 self.table_visible_index += 1
         except StopIteration:
             return
@@ -2047,72 +2064,91 @@ class ExtensionRepairApp:
         self.root.after_idle(lambda: self.populate_table_chunk(refresh_token))
 
     def update_select_all_header(self):
-        """Keep the header checkbox synchronized with visible rows."""
-        visible_records = [
-            record for record in self.records
-            if self._record_visible(record)
-        ]
+        """Synchronize the header checkbox with current visible rows.
 
-        if visible_records and all(record.get("path") in self.checked_records for record in visible_records):
-            self.select_all_state = True
-            self.tree.heading("select", text="☑", command=self.toggle_all_checkbox)
-        else:
+        States:
+        ☐ no visible rows selected
+        ☑ all visible rows selected
+        ▣ some visible rows selected
+        """
+        visible_paths = {
+            record.get("path")
+            for record in self.records
+            if self._record_visible(record) and record.get("path")
+        }
+
+        selected_paths = visible_paths.intersection(self.checked_records)
+
+        if not visible_paths or not selected_paths:
+            symbol = "☐"
             self.select_all_state = False
-            self.tree.heading("select", text="☐", command=self.toggle_all_checkbox)
+        elif selected_paths == visible_paths:
+            symbol = "☑"
+            self.select_all_state = True
+        else:
+            symbol = "▣"
+            self.select_all_state = False
+
+        self.tree.heading("select", text=symbol, command=self.toggle_all_checkbox)
 
     def toggle_all_checkbox(self):
-        """Select or clear all currently visible scan result rows."""
+        """Toggle selection of all currently visible rows.
+
+        File paths are the only selection source of truth. The Treeview is
+        updated in-place so scrolling and large-list selection remain stable.
+        """
         visible_records = [
             record for record in self.records
-            if self._record_visible(record)
+            if self._record_visible(record) and record.get("path")
         ]
 
-        self.select_all_state = not self.select_all_state
+        if not visible_records:
+            return
 
-        if self.select_all_state:
-            self.checked_records.update(record.get("path") for record in visible_records)
+        visible_paths = {record.get("path") for record in visible_records}
+        all_selected = visible_paths.issubset(self.checked_records)
+
+        if all_selected:
+            self.checked_records.difference_update(visible_paths)
         else:
-            self.checked_records.difference_update(record.get("path") for record in visible_records)
+            self.checked_records.update(visible_paths)
 
-        # Update existing rows without rebuilding the table.
-        for item_id, record in self.item_to_record.items():
-            if record.get("path") in self.checked_records:
-                values = list(self.tree.item(item_id, "values"))
+        for path in visible_paths:
+            if self.tree.exists(path):
+                values = list(self.tree.item(path, "values"))
                 if values:
-                    values[0] = "☑"
-                    self.tree.item(item_id, values=values)
-            else:
-                values = list(self.tree.item(item_id, "values"))
-                if values:
-                    values[0] = "☐"
-                    self.tree.item(item_id, values=values)
+                    values[0] = "☑" if path in self.checked_records else "☐"
+                    self.tree.item(path, values=values)
+
+        self.update_select_all_header()
+        self.update_action_buttons()
 
     def toggle_checkbox(self, event):
-        """Toggle row checkbox without affecting the existing scan logic."""
+        """Toggle one row checkbox without rebuilding the Treeview."""
         item_id = self.tree.identify_row(event.y)
         column = self.tree.identify_column(event.x)
 
         if not item_id or column != "#1":
             return
 
-        record = self.item_to_record.get(item_id)
-        if record is None:
+        file_path = item_id
+        if not file_path:
             return
 
-        record_id = record.get("path")
-        if record_id in self.checked_records:
-            self.checked_records.remove(record_id)
+        if file_path in self.checked_records:
+            self.checked_records.remove(file_path)
+            checked = "☐"
         else:
-            self.checked_records.add(record_id)
+            self.checked_records.add(file_path)
+            checked = "☑"
+
+        values = list(self.tree.item(item_id, "values"))
+        if values:
+            values[0] = checked
+            self.tree.item(item_id, values=values)
 
         self.update_select_all_header()
-
-        # Update only the clicked row. Rebuilding the Treeview here causes
-        # scroll jumps and makes selecting many files unreliable.
-        current_values = list(self.tree.item(item_id, "values"))
-        if current_values:
-            current_values[0] = "☑" if record_id in self.checked_records else "☐"
-            self.tree.item(item_id, values=current_values)
+        self.update_action_buttons()
 
         return "break"
 
@@ -2276,6 +2312,7 @@ class ExtensionRepairApp:
                 self.select_all_var.set(False)
 
             self.refresh_table()
+            self.update_action_buttons()
 
             if result["message"]:
                 self.log(result["message"])
@@ -2307,6 +2344,7 @@ class ExtensionRepairApp:
             self.scan_files()
         else:
             self.refresh_table()
+            self.update_action_buttons()
 
     def export_report(self):
         """Export all current scan records, including hidden filtered entries."""
