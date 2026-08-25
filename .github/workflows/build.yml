@@ -24,7 +24,7 @@ jobs:
 
       - name: Build SuffixFixer
         run: |
-          pyinstaller --onefile --windowed --name SuffixFixer --icon=app.ico --add-data "app.ico;." main.py
+          pyinstaller --onefile --windowed --name ExtensionFixer --icon=app.ico --add-data "app.ico;." main.py
 
       - name: Copy configuration
         run: |
