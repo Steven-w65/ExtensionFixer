@@ -29,7 +29,7 @@ It changes **only the filename**. File content is never edited, converted, or re
 | Fully configurable formats | All signatures live in `custom_magic_formats.json`; no formats are hard-coded in Python. |
 | Safe repair workflow | Preview before rename, confirmation before repair, conflict protection, optional backups, and undo logging. |
 | Batch undo | Undo the latest repair batch or preview and restore all recorded batches. |
-| Large-folder friendly | Uses streamed `os.scandir()` traversal, chunked scanning, and incremental table rendering. |
+| Large-folder friendly | Uses a background scanner thread, streamed `os.scandir()` traversal, queue-based GUI updates, and incremental table rendering. |
 | Responsive controls | The Scan button becomes **Stop Scan** during scanning; partial results are retained safely. |
 | High-resolution UI | Responsive sizing, larger typography, and scaled table rows for high-resolution/4K displays. |
 | Reports | Export all scan results to CSV. |
@@ -240,8 +240,10 @@ Each successfully planned repair is stored in `operation_log.json` before the fi
 
 For large folders, the application:
 
+- Runs directory traversal, metadata reads, and magic-number detection in a background worker thread.
+- Transfers results to Tkinter through a thread-safe `queue.Queue`; worker code never updates GUI widgets directly.
 - Streams folder entries with `os.scandir()`.
-- Scans in small Tkinter event-loop chunks.
+- Drains worker events in bounded Tkinter batches, keeping buttons and redraws responsive.
 - Renders result rows in batches instead of locking the interface while building a large table.
 - Lets you stop an active scan without losing results already gathered.
 - Excludes the top-level `backup` directory from recursive scans.

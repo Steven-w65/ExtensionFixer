@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+*.tmp
+*.partial
+
+# Runtime recovery state is created by the application.
+operation_log.json

@@ -5,9 +5,10 @@ from pathlib import Path
 import json
 import csv
 import sys
+import queue
+import threading
 
 def get_resource_path(relative_path):
-    """兼容源码运行 和 pyinstaller --onefile单exe打包"""
     if hasattr(sys, '_MEIPASS'):
         base_path = sys._MEIPASS
     else:
@@ -417,6 +418,90 @@ class FileScanner:
 
         record["status"] = "Repair required"
         return record
+
+
+class ScanWorker:
+    """Runs FileScanner work off the Tkinter thread and emits queue events."""
+
+    def __init__(
+        self,
+        scanner,
+        event_queue,
+        stop_event,
+        scan_token,
+        root_folder,
+        recursive,
+        max_size_mb,
+        blacklist,
+    ):
+        self.scanner = scanner
+        self.event_queue = event_queue
+        self.stop_event = stop_event
+        self.scan_token = scan_token
+        self.root_folder = root_folder
+        self.recursive = recursive
+        self.max_size_mb = max_size_mb
+        self.blacklist = blacklist
+
+    def emit(self, event_type, payload):
+        """Put an event with backpressure while allowing prompt cancellation."""
+        while True:
+            try:
+                self.event_queue.put((event_type, self.scan_token, payload), timeout=0.1)
+                return True
+            except queue.Full:
+                if self.stop_event.is_set():
+                    return False
+
+    def run(self):
+        """Scan files and report records, progress, errors, and completion."""
+        processed_count = 0
+        repair_count = 0
+
+        try:
+            def worker_log(message):
+                self.emit("log", message)
+
+            for record in self.scanner.scan_iter(
+                root_folder=self.root_folder,
+                recursive=self.recursive,
+                max_size_mb=self.max_size_mb,
+                blacklist=self.blacklist,
+                logger=worker_log,
+            ):
+                if self.stop_event.is_set():
+                    self.emit("stopped", {
+                        "processed": processed_count,
+                        "repair_count": repair_count,
+                    })
+                    return
+
+                if not self.emit("record", record):
+                    return
+
+                processed_count += 1
+                if record.get("status") == "Repair required":
+                    repair_count += 1
+
+                if processed_count % 250 == 0:
+                    if not self.emit("progress", {
+                        "processed": processed_count,
+                        "repair_count": repair_count,
+                    }):
+                        return
+
+            if self.stop_event.is_set():
+                self.emit("stopped", {
+                    "processed": processed_count,
+                    "repair_count": repair_count,
+                })
+            else:
+                self.emit("completed", {
+                    "processed": processed_count,
+                    "repair_count": repair_count,
+                })
+        except Exception as error:
+            self.emit("error", str(error))
 
 
 class FileOperations:
@@ -900,7 +985,7 @@ class ExtensionRepairApp:
     """Tkinter UI layer for the Magic Number File Extension Repair Tool."""
 
     APP_TITLE = "Extension Fixer"
-    VERSION = "Version 1.0.1"
+    VERSION = "Version 1.0.2"
     STRATEGY_LABELS = {
         1: "1 - Auto append serial number",
         2: "2 - Skip when duplicate name exists",
@@ -933,6 +1018,10 @@ class ExtensionRepairApp:
         self.config_window = None
         self.settings_window = None
         self.scan_iterator = None
+        self.scan_thread = None
+        self.scan_stop_event = None
+        self.scan_event_queue = None
+        self.accept_scan_events = False
         self.scan_root_path = None
         self.scan_processed_count = 0
         self.scan_session_token = 0
@@ -1029,6 +1118,11 @@ class ExtensionRepairApp:
             self.log(f"Could not save software settings: {error}")
 
     def on_close(self):
+        # Never let a background worker publish into a destroyed Tk window.
+        self.accept_scan_events = False
+        self.scan_session_token += 1
+        if self.scan_stop_event is not None:
+            self.scan_stop_event.set()
         self.save_settings()
         self.root.destroy()
 
@@ -1693,24 +1787,40 @@ class ExtensionRepairApp:
 
         self.scan_root_path = root_path
         self.scan_processed_count = 0
-        self.scan_iterator = self.scanner.scan_iter(
+        self.scan_repair_count = 0
+        self.accept_scan_events = True
+        self.scan_event_queue = queue.Queue(maxsize=2000)
+        self.scan_stop_event = threading.Event()
+        worker = ScanWorker(
+            scanner=self.scanner,
+            event_queue=self.scan_event_queue,
+            stop_event=self.scan_stop_event,
+            scan_token=scan_token,
             root_folder=root_path,
             recursive=self.recursive_var.get(),
             max_size_mb=max_size_mb,
             blacklist=blacklist,
-            logger=self.log
         )
-        self.root.after(1, lambda: self.process_scan_chunk(scan_token))
+        self.scan_thread = threading.Thread(
+            target=worker.run,
+            name=f"ExtensionFixerScan-{scan_token}",
+            daemon=True,
+        )
+        self.scan_thread.start()
+        self.root.after(20, lambda: self.process_scan_events(scan_token))
 
     def stop_scan(self):
         """Stop the active scan while retaining results gathered so far."""
         if not self.scan_in_progress:
             return
 
-        # Invalidate every queued callback for this scan before performing any
-        # other action. A later scan receives a different token.
+        # Invalidate queued UI callbacks and ask the worker to stop. The
+        # worker checks this event between records and never touches Tkinter.
+        self.accept_scan_events = False
         self.scan_session_token += 1
         self.scan_stopped_by_user = True
+        if self.scan_stop_event is not None:
+            self.scan_stop_event.set()
         self.scan_iterator = None
         self.scan_in_progress = False
         self.refresh_table()
@@ -1732,44 +1842,86 @@ class ExtensionRepairApp:
             command=self.scan_files
         )
 
-    def process_scan_chunk(self, scan_token):
-        """Process a limited number of files, then return control to Tkinter."""
+    def process_scan_events(self, scan_token):
+        """Drain worker events in bounded batches on Tkinter's main thread."""
         if (
             scan_token != self.scan_session_token or
-            not self.scan_in_progress or
-            self.scan_iterator is None
+            not self.accept_scan_events or
+            self.scan_event_queue is None
         ):
             return
 
-        chunk_size = 150
-        try:
-            for _ in range(chunk_size):
-                record = next(self.scan_iterator)
-                self.records.append(record)
-                self.scan_processed_count += 1
+        processed_events = 0
+        terminal_event = False
 
-            if self.scan_processed_count % 1500 == 0:
-                self.log(f"Scanning… {self.scan_processed_count} file(s) processed.")
-            self.root.after(1, lambda: self.process_scan_chunk(scan_token))
-        except StopIteration:
-            self.scan_iterator = None
-            self.scan_in_progress = False
-            self.reset_scan_button()
-            self.refresh_table()
-            repair_count = sum(
-                1 for record in self.records
-                if record["status"] == "Repair required"
-            )
+        while processed_events < 300:
+            try:
+                event_type, event_token, payload = self.scan_event_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            if event_token != scan_token:
+                continue
+
+            processed_events += 1
+
+            if event_type == "record":
+                self.records.append(payload)
+            elif event_type == "progress":
+                self.scan_processed_count = payload["processed"]
+                self.scan_repair_count = payload["repair_count"]
+                self.log(
+                    f"Scanning… checked {self.scan_processed_count:,} file(s); "
+                    f"{self.scan_repair_count:,} repair candidate(s)."
+                )
+            elif event_type == "log":
+                self.log(payload)
+            elif event_type == "completed":
+                self.finish_scan(payload, stopped=False)
+                terminal_event = True
+                break
+            elif event_type == "stopped":
+                self.finish_scan(payload, stopped=True)
+                terminal_event = True
+                break
+            elif event_type == "error":
+                self.finish_scan({}, stopped=False)
+                self.log(f"Unexpected scan error: {payload}")
+                messagebox.showerror("Scan Error", f"An unexpected error occurred:\n{payload}")
+                terminal_event = True
+                break
+
+        if not terminal_event and self.scan_in_progress:
+            self.root.after(20, lambda: self.process_scan_events(scan_token))
+
+    def finish_scan(self, summary, stopped):
+        """Finalize a worker scan after all relevant queue events are handled."""
+        self.accept_scan_events = False
+        self.scan_in_progress = False
+        self.scan_thread = None
+        self.scan_stop_event = None
+        self.reset_scan_button()
+        self.refresh_table()
+
+        processed_count = summary.get("processed", len(self.records))
+        repair_count = summary.get(
+            "repair_count",
+            sum(1 for record in self.records if record["status"] == "Repair required")
+        )
+        self.scan_processed_count = processed_count
+        self.scan_repair_count = repair_count
+
+        if stopped:
+            self.scan_stopped_by_user = True
             self.log(
-                f"Scan complete: {len(self.records)} file(s) found; "
-                f"{repair_count} file(s) require repair."
+                f"Scan stopped: {processed_count:,} file(s) processed; "
+                f"{repair_count:,} file(s) require repair."
             )
-        except Exception as error:
-            self.scan_iterator = None
-            self.scan_in_progress = False
-            self.reset_scan_button()
-            self.log(f"Unexpected scan error: {error}")
-            messagebox.showerror("Scan Error", f"An unexpected error occurred:\n{error}")
+        else:
+            self.log(
+                f"Scan complete: {processed_count:,} file(s) found; "
+                f"{repair_count:,} file(s) require repair."
+            )
 
     def _record_visible(self, record):
         """Apply the Show-only-repair-items UI filter."""
