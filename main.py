@@ -4,7 +4,15 @@ import os
 from pathlib import Path
 import json
 import csv
+import sys
 
+def get_resource_path(relative_path):
+    """兼容源码运行 和 pyinstaller --onefile单exe打包"""
+    if hasattr(sys, '_MEIPASS'):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 class ApplicationSettings:
     """Loads and saves all non-format application preferences."""
@@ -891,8 +899,8 @@ class FileOperations:
 class ExtensionRepairApp:
     """Tkinter UI layer for the Magic Number File Extension Repair Tool."""
 
-    APP_TITLE = "Suffix Fixer"
-    VERSION = "Version 1.0.1"
+    APP_TITLE = "Magic Number Intelligent File Extension Repair Tool"
+    VERSION = "Version 1.0"
     STRATEGY_LABELS = {
         1: "1 - Auto append serial number",
         2: "2 - Skip when duplicate name exists",
@@ -2245,6 +2253,8 @@ class ExtensionRepairApp:
 
 def main():
     root = tk.Tk()
+    icon_file = get_resource_path("app.ico")
+    root.iconbitmap(icon_file)
     ExtensionRepairApp(root)
     root.mainloop()
 
