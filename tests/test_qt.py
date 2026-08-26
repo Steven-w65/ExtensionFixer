@@ -344,7 +344,10 @@ class QtTestCase(unittest.TestCase):
             window.start_scan()
             self._wait_until(lambda: window.scan_thread is None)
             self.assertTrue(source.exists())
-            window.model.set_paths_checked({str(source)}, True)
+            scanned_path = window.model.records[0]["path"]
+            self.assertTrue(os.path.samefile(source, scanned_path))
+            self.assertTrue(window.model.set_paths_checked({scanned_path}, True))
+            self.assertEqual({scanned_path}, window.model.checked_paths)
             # Editing the path field after scanning must not redirect an
             # already-prepared repair operation to another folder.
             unrelated = root / "unrelated"
