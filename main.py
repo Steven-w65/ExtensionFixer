@@ -1028,7 +1028,8 @@ class ExtensionRepairApp:
         self.stop_flush_pending = False
         self.pending_terminal = None
         self.table_refresh_token = 0
-        self.max_pending_records = 500
+        self.table_refresh_in_progress = False
+        self.pending_live_records = []
         self.checked_records = set()
         self.select_all_var = tk.BooleanVar(value=False)
         self.select_all_state = False
@@ -1324,7 +1325,10 @@ class ExtensionRepairApp:
             table_frame,
             columns=columns,
             show="headings",
-            selectmode="extended"
+            # Checkbox state is the only source of action selection. Disabling
+            # native row selection avoids a highlighted row appearing as if it
+            # will be included in Preview or Execute Repair.
+            selectmode="none"
         )
         self.tree.bind("<Button-1>", self.toggle_checkbox)
 
@@ -1452,15 +1456,20 @@ class ExtensionRepairApp:
 
         active_selection = self.checked_records.intersection(current_paths)
         has_selection = bool(active_selection)
+        actions_available = (
+            has_selection and
+            not self.scan_in_progress and
+            not self.operation_in_progress
+        )
 
         if hasattr(self, "preview_button"):
             self.preview_button.configure(
-                state="normal" if has_selection else "disabled"
+                state="normal" if actions_available else "disabled"
             )
 
         if hasattr(self, "repair_button"):
             self.repair_button.configure(
-                state="normal" if has_selection else "disabled"
+                state="normal" if actions_available else "disabled"
             )
 
     def log(self, message):
@@ -1801,7 +1810,15 @@ class ExtensionRepairApp:
             style="Danger.TButton",
             command=self.stop_scan
         )
+
+        # A scan is a new selection session. Retaining checkbox paths from an
+        # earlier scan could silently re-select files that still have the same
+        # paths, which is unsafe for a rename-oriented workflow.
+        self.checked_records.clear()
+        self.select_all_state = False
+        self.select_all_var.set(False)
         self.records = []
+        self.update_action_buttons()
         self.refresh_table()
 
         self.reload_custom_formats()
@@ -1816,7 +1833,6 @@ class ExtensionRepairApp:
         self.scan_root_path = root_path
         self.scan_processed_count = 0
         self.scan_repair_count = 0
-        self.pending_table_refresh = False
         self.accept_scan_events = True
         self.scan_event_queue = queue.Queue(maxsize=5000)
         self.scan_stop_event = threading.Event()
@@ -1839,8 +1855,13 @@ class ExtensionRepairApp:
         self.root.after(100, lambda: self.process_scan_events(scan_token))
 
     def stop_scan(self):
-        """Immediately cancel the active scan session."""
+        """Request cancellation and keep operations locked until worker exit."""
         if not self.scan_in_progress:
+            return
+
+        # Ignore repeated programmatic requests while the disabled Stop button
+        # is already waiting for the same worker to terminate.
+        if self.scan_stop_event is not None and self.scan_stop_event.is_set():
             return
 
         self.scan_stopped_by_user = True
@@ -1864,18 +1885,59 @@ class ExtensionRepairApp:
             except queue.Empty:
                 pass
 
+        # scan_in_progress deliberately remains True. This blocks Scan,
+        # Execute Repair, and Undo until the exact worker reports that it is no
+        # longer alive.
+        self.update_action_buttons()
+        worker_thread = self.scan_thread
+        if worker_thread is None or not worker_thread.is_alive():
+            self.finish_cancelled_scan(worker_thread)
+        else:
+            self.root.after(
+                50,
+                lambda: self.wait_for_scan_thread_stop(worker_thread)
+            )
+
+    def wait_for_scan_thread_stop(self, worker_thread):
+        """Poll without blocking Tkinter until the cancelled worker exits."""
+        if worker_thread is not self.scan_thread:
+            return
+
+        if worker_thread.is_alive():
+            self.root.after(
+                50,
+                lambda: self.wait_for_scan_thread_stop(worker_thread)
+            )
+            return
+
+        self.finish_cancelled_scan(worker_thread)
+
+    def finish_cancelled_scan(self, worker_thread):
+        """Unlock the application after confirmed cancellation completion."""
+        if worker_thread is not None and worker_thread is not self.scan_thread:
+            return
+
+        # The worker may have emitted one final stopped event just before
+        # exiting. It belongs to the invalidated session and must not leak into
+        # a later scan.
+        if self.scan_event_queue is not None:
+            try:
+                while True:
+                    self.scan_event_queue.get_nowait()
+            except queue.Empty:
+                pass
+
         self.scan_in_progress = False
         self.scan_thread = None
         self.scan_stop_event = None
-        self.pending_table_refresh = False
+        self.scan_event_queue = None
         self.pending_terminal = None
         self.reset_scan_button()
-        # Re-enable the scan button after a hard cancellation.
-        # reset_scan_button only restores command/text; it must not leave the
-        # primary action disabled.
-        self.scan_button.configure(state="normal")
-        # v11 uses a single toggle scan button; there is no separate stop_button widget.\n        self.scan_button.configure(state="normal")
-        self.log("Scan cancelled. Ready for a new scan.")
+        self.update_action_buttons()
+        self.log(
+            f"Scan cancelled after worker exit. "
+            f"Retained {len(self.records):,} processed result(s)."
+        )
 
 
     def reset_scan_button(self):
@@ -1897,6 +1959,7 @@ class ExtensionRepairApp:
 
         processed_events = 0
         terminal_event = False
+        new_records = []
 
         while processed_events < 300:
             try:
@@ -1912,7 +1975,7 @@ class ExtensionRepairApp:
             if event_type == "record":
                 payload.setdefault("record_id", uuid.uuid4().hex)
                 self.records.append(payload)
-                self.pending_table_refresh = True
+                new_records.append(payload)
             elif event_type == "progress":
                 self.scan_processed_count = payload["processed"]
                 self.scan_repair_count = payload["repair_count"]
@@ -1937,13 +2000,12 @@ class ExtensionRepairApp:
                 terminal_event = True
                 break
 
-        if self.pending_table_refresh:
-            pending_count = len(self.records)
-            if pending_count >= self.max_pending_records:
-                self.pending_table_refresh = False
-                self.refresh_table()
+        # Add only records received in this queue pass. Rebuilding every row
+        # repeatedly makes large scans progressively slower.
+        self.append_live_records(new_records)
 
-        # After worker termination, drain remaining queued events before final refresh.
+        # After worker termination, drain any remaining queued events before
+        # finalizing the scan summary.
         if terminal_event and self.pending_terminal is not None:
             remaining = not self.scan_event_queue.empty() if self.scan_event_queue else False
             if remaining:
@@ -1959,14 +2021,38 @@ class ExtensionRepairApp:
 
     def finish_scan(self, summary, stopped):
         """Finalize a worker scan after all relevant queue events are handled."""
+        if (
+            self.scan_stopped_by_user and
+            self.scan_stop_event is not None and
+            self.scan_stop_event.is_set()
+        ):
+            # A Stop request won a race with the worker's terminal event. The
+            # cancellation poll owns final cleanup and must remain the only
+            # path that unlocks the application.
+            return
+
+        worker_thread = self.scan_thread
+        if worker_thread is not None and worker_thread.is_alive():
+            # The terminal queue event is emitted immediately before run()
+            # returns. Confirm the thread has actually exited before unlocking
+            # file operations or allowing another scan.
+            self.root.after(25, lambda: self.finish_scan(summary, stopped))
+            return
+
         self.accept_scan_events = False
         self.scan_in_progress = False
         self.scan_thread = None
         self.scan_stop_event = None
+        self.scan_event_queue = None
         self.reset_scan_button()
-        self.pending_table_refresh = False
         self.stop_flush_pending = False
-        self.refresh_table()
+
+        # All record events are appended before the terminal event is handled.
+        # A full Treeview rebuild here would duplicate work and stall large
+        # scans at the moment they complete.
+        if not self.table_refresh_in_progress:
+            self.update_select_all_header()
+            self.update_action_buttons()
 
         processed_count = summary.get("processed", len(self.records))
         repair_count = summary.get(
@@ -2015,19 +2101,26 @@ class ExtensionRepairApp:
 
     def manual_refresh_table(self):
         """Manually refresh visible scan results without restarting the scan."""
-        self.pending_table_refresh = False
         self.refresh_table()
         self.log("Scan results refreshed.")
 
     def refresh_table(self):
-        """Rebuild large tables in small UI batches to avoid a render freeze."""
+        """Rebuild the table only for explicit refreshes or data changes."""
         self.table_refresh_token += 1
         refresh_token = self.table_refresh_token
+
+        # Every record that exists now is included in this immutable snapshot.
+        # Records arriving later are buffered and appended when the rebuild is
+        # complete, preventing duplicate item IDs and preserving row order.
+        record_snapshot = tuple(self.records)
+        self.pending_live_records = []
+        self.table_refresh_in_progress = True
+
         for item_id in self.tree.get_children():
             self.tree.delete(item_id)
 
         self.update_select_all_header()
-        self.table_record_iterator = iter(self.records)
+        self.table_record_iterator = iter(record_snapshot)
         self.table_visible_index = 0
         self.root.after_idle(lambda: self.populate_table_chunk(refresh_token))
 
@@ -2043,25 +2136,68 @@ class ExtensionRepairApp:
                 if not self._record_visible(record):
                     continue
 
-                item_id = self.tree.insert(
-                    "",
-                    "end",
-                    iid=record["path"],
-                    values=(
-                        "☑" if record.get("path") in self.checked_records else "☐",
-                        record["relative_path"],
-                        record["current_extension"] or "(none)",
-                        record["detected_extension"] or "(unknown)",
-                        record["status"],
-                    ),
-                    tags=(self._record_tag(record, self.table_visible_index),)
-                )
-
-                self.table_visible_index += 1
+                self.insert_table_record(record)
         except StopIteration:
+            self.table_refresh_in_progress = False
+            pending_records = self.pending_live_records
+            self.pending_live_records = []
+            self.append_live_records(pending_records)
+            self.update_select_all_header()
+            self.update_action_buttons()
             return
 
         self.root.after_idle(lambda: self.populate_table_chunk(refresh_token))
+
+    def insert_table_record(self, record):
+        """Insert one visible record and return whether a row was added."""
+        if not self._record_visible(record):
+            return False
+
+        item_id = record.get("path", "")
+        if not item_id or self.tree.exists(item_id):
+            return False
+
+        self.tree.insert(
+            "",
+            "end",
+            iid=item_id,
+            values=(
+                "☑" if item_id in self.checked_records else "☐",
+                record["relative_path"],
+                record["current_extension"] or "(none)",
+                record["detected_extension"] or "(unknown)",
+                record["status"],
+            ),
+            tags=(self._record_tag(record, self.table_visible_index),)
+        )
+        self.table_visible_index += 1
+        return True
+
+    def append_live_records(self, records):
+        """Append a queue batch without rebuilding rows already displayed."""
+        if not records:
+            return
+
+        if self.table_refresh_in_progress:
+            self.pending_live_records.extend(records)
+            return
+
+        inserted_count = 0
+        for record in records:
+            if self.insert_table_record(record):
+                inserted_count += 1
+
+        if inserted_count:
+            # New rows start unchecked. If every prior visible row was checked,
+            # the header becomes indeterminate without scanning the full result
+            # list on every live batch.
+            if self.tree.heading("select", "text") == "☑":
+                self.select_all_state = False
+                self.tree.heading(
+                    "select",
+                    text="▣",
+                    command=self.toggle_all_checkbox
+                )
 
     def update_select_all_header(self):
         """Synchronize the header checkbox with current visible rows.
@@ -2337,6 +2473,10 @@ class ExtensionRepairApp:
             )
         finally:
             self.operation_in_progress = False
+            # This also runs for early returns such as safe-mode conflicts,
+            # backup setup failures, and protected/corrupt operation logs.
+            # Recalculate from current checkbox state after unlocking.
+            self.update_action_buttons()
 
         # A manually stopped scan must stay stopped. Preserve its partial
         # results instead of silently starting a new full scan after repair.
