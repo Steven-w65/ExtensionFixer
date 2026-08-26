@@ -62,15 +62,20 @@ holiday-photo.bin  →  89 50 4E 47 0D 0A 1A 0A  →  holiday-photo.png
 
 ## How it works
 
-```mermaid
-flowchart LR
-    A[Select a folder] --> B[Scan in background]
-    B --> C[Read first 16 bytes]
-    C --> D[Match configured signatures]
-    D --> E[Review and check candidates]
-    E --> F[Preview rename plan]
-    F --> G[Confirm safe repair]
-    G --> H[Record operation for undo]
+```text
+Select folder
+    ↓
+Scan files in the background
+    ↓
+Read the first 16 bytes
+    ↓
+Match configured signatures
+    ↓
+Review and check repair candidates
+    ↓
+Preview and confirm the rename plan
+    ↓
+Rename safely and record undo history
 ```
 
 Files without a matching configured signature—including ordinary text files—are
