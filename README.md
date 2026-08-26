@@ -1,252 +1,108 @@
-# 🛠️ Extension Fixer
+# Extension Fixer 2.0
 
-<p align="center">
-  <strong>A safe, lightweight desktop tool for detecting and repairing incorrect file extensions using binary magic numbers.</strong>
-</p>
+Extension Fixer identifies a file's real format from its binary signature and
+safely repairs an incorrect filename extension. Its responsive PyQt6 interface
+streams scan results into the table while a worker thread handles directory and
+file I/O.
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white">
-  <img src="https://img.shields.io/badge/GUI-Tkinter-4A90A4">
-  <img src="https://img.shields.io/badge/Dependencies-None-2E8B57">
-  <img src="https://img.shields.io/badge/Scanner-Threaded-success">
-  <img src="https://img.shields.io/badge/Results-Live%20Updates-blue">
-  <img src="https://img.shields.io/badge/Repair-Safe%20Rename-orange">
-</p>
+## Highlights
 
----
+- Reads no more than the first 16 bytes of each file.
+- Scans one folder or a complete subdirectory tree without following links.
+- Shows results continuously in efficient UI batches.
+- Stops cooperatively and waits for confirmed worker termination.
+- Filters repair candidates and supports reliable per-file or visible-row checks.
+- Offers preview and confirmed repair workflows.
+- Never overwrites an existing target name.
+- Supports optional timestamped backups and three duplicate-name strategies.
+- Exports complete scan results to CSV.
+- Previews and restores either the latest rename batch or all recorded changes.
+- Stores all application preferences in `settings.json` and all detection rules
+  in `custom_magic_formats.json`.
 
-## ✨ Overview
+## Configured formats
 
-Files can lose their correct extensions because of accidental renaming, failed transfers, or software issues.
+The included configuration recognizes PNG, JPEG, GIF, BMP, ICO, WebP, ZIP, PDF,
+RAR, 7-Zip, Windows executables, MP4, AVI, WAV, PSD, GZip, ID3-tagged MP3, and
+FLAC files. Formats can be added, changed, or removed in **Settings → File
+Formats**. Every signature and offset must fit within bytes 0–15.
 
-A file named:
+Text files and any binary format without a configured matching signature are
+reported as unidentifiable.
 
-```
-photo.tmp
-```
+## Run from source
 
-may actually be:
+Python 3.10 or newer is required.
 
-```
-photo.png
-```
-
-Extension Fixer identifies the real file type by analyzing binary signatures (**magic numbers**) instead of trusting the filename.
-
-It then allows you to safely repair the filename extension while keeping the original file content untouched.
-
----
-
-# 🚀 Highlights
-
-| | Feature |
-|-|-|
-| 🔍 | Magic-number based file detection |
-| ⚡ | Background threaded scanning |
-| 📋 | Live scan result updates |
-| ☑️ | Stable checkbox selection |
-| 👀 | Preview before repair |
-| 🛡️ | Backup and undo support |
-| 📄 | CSV reporting |
-| 🖥️ | DPI-aware interface |
-| 📦 | No external dependencies |
-
----
-
-# 🔄 How It Works
-
-```
-Select Folder
-      │
-      ▼
-Scan Files
-      │
-      ▼
-Read Magic Number
-(first 16 bytes)
-      │
-      ▼
-Compare Extension
-      │
-      ▼
-Review Results
-      │
-      ▼
-Select Files
-      │
-      ▼
-Preview Repair
-      │
-      ▼
-Rename Safely
-```
-
----
-
-# ⭐ Key Features
-
-## ⚡ Responsive Large Folder Scanning
-
-Extension Fixer uses a background worker thread to keep the interface responsive.
-
-Benefits:
-
-- Scan large folders without freezing the UI
-- View results while scanning continues
-- Stop and restart scans safely
-- Incrementally update results
-
----
-
-## ☑️ Reliable File Selection
-
-The result table uses file-path based selection tracking.
-
-This prevents common issues:
-
-✅ Selection lost after refresh  
-✅ Wrong files selected after sorting/filtering  
-✅ Long-list selection instability  
-
-Selecting files only updates the affected row instead of rebuilding the entire table.
-
----
-
-## 🛡️ Safe Repair Workflow
-
-Repairs are designed to minimize risk:
-
-- File contents are never modified
-- Only filenames are changed
-- Conflicts are checked before renaming
-- Optional backups are available
-- Undo history is recorded
-
----
-
-# 📸 Interface
-
-Main workflow:
-
-```
-┌──────────────────────────────┐
-│ Folder Selection              │
-│ [Select Folder] [Scan Files]  │
-└──────────────────────────────┘
-
-┌──────────────────────────────┐
-│ Scan Results                  │
-│ ☑ File   Current   Detected   │
-│                              │
-└──────────────────────────────┘
-
-┌──────────────┐ ┌────────────┐
-│ Operation Log│ │  Actions   │
-│              │ │ Preview    │
-│              │ │ Repair     │
-│              │ │ Undo       │
-└──────────────┘ └────────────┘
-```
-
----
-
-# 📦 Installation
-
-## Requirements
-
-- Python 3.9+
-- Tkinter enabled
-
-## Run
-
-```bash
+```powershell
+python -m pip install -r requirements.txt
 python main.py
 ```
 
-No package installation required.
+This is a portable source layout. Keep `app.ico`, `settings.json`, and
+`custom_magic_formats.json` beside `main.py`. Runtime settings and
+`operation_log.json` are stored in the same folder.
 
----
+## Legacy Tkinter version
 
-# 📝 Workflow
+The previous standard-library Tkinter application is preserved in
+[`legacy/`](legacy/README.md). It has its own settings, format configuration,
+icon, and undo log, so it can be run independently without affecting version
+2.0.
 
-1. Select a target folder.
-2. Configure scan settings.
-3. Click **Scan Files**.
-4. Review detected problems.
-5. Select files using checkboxes.
-6. Click **Preview Repairs**.
-7. Confirm **Execute Repair**.
-8. Restore changes with **Undo Recorded Changes** if required.
+## Test
 
----
-
-# ⚙️ Configuration
-
-| File | Purpose |
-|-|-|
-| `settings.json` | Application preferences |
-| `custom_magic_formats.json` | File signature definitions |
-| `operation_log.json` | Undo history |
-
----
-
-# 📊 CSV Reports
-
-Reports are exported as:
-
-```
-extensionfixer_report.csv
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+python -m unittest discover -v
+python -m compileall -q main.py extension_fixer tests
+python -m pip check
 ```
 
-Includes:
+The suite covers configuration parsing, every included signature, streaming
+scans, blacklist and size limits, cancellation, large-list model behavior,
+checkbox input, duplicate strategies, backups, repair integrity rechecks,
+protected operation logs, latest/all undo, CSV export, Qt worker shutdown, and
+the complete main-window lifecycle.
 
-- File path
-- Current extension
-- Detected extension
-- File size
-- Status
-- Repair information
+## Build the Windows package
 
----
+Open **Actions → Build Windows application → Run workflow** in the GitHub
+repository. The manual workflow tests the checked-out commit, builds the x64
+one-folder application, runs a startup smoke test, and uploads
+`ExtensionFixer-Windows-x64.zip` together with its SHA-256 checksum. The
+artifact is retained for 14 days. The workflow does not create a GitHub Release.
 
-# 🔧 Performance Design
+## Safety model
 
-Large scans are optimized through:
+- Scanning, filtering, preview, and export do not modify scanned files.
+- Repairs change file names only; binary content is never rewritten.
+- A file's signature and current blacklist are checked again immediately before
+  repair.
+- Backups complete before their corresponding rename.
+- Existing paths are never replaced, including broken links.
+- Operation history is written atomically before renaming so interrupted work
+  remains recoverable.
+- Undo blocks malformed paths, linked paths, conflicts, missing files, and files
+  whose size changed after repair.
+- New scans and operations remain locked until the active worker thread exits.
 
-- Threaded scanning
-- Queue-based UI communication
-- Streaming directory traversal
-- Incremental table updates
-- Reduced unnecessary refresh operations
+## License
 
----
+Extension Fixer 2.0 and all repository files outside `legacy/` are licensed
+under the **GNU General Public License version 3 only** (`GPL-3.0-only`). See
+[`LICENSE`](LICENSE).
 
-# 📁 Project Structure
+The archived Tkinter application in `legacy/` remains available under the MIT
+License. See [`legacy/LICENSE`](legacy/LICENSE).
 
-```text
-.
-├── main.py
-├── settings.json
-├── custom_magic_formats.json
-├── operation_log.json
-└── README.md
-```
+PyQt6 is GPLv3 software, the Qt runtime installed by the pinned PyQt6 wheel is
+LGPLv3, and PyQt6-sip is BSD-2-Clause. Copyright and license details are listed
+in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and [`licenses/`](licenses/).
 
----
-
-# 🧪 Development Guidelines
-
-When contributing:
-
-- Keep the project dependency-free
-- Preserve rename-only repairs
-- Never modify file contents
-- Maintain threaded scanning behavior
-- Keep selection tracking path-based
-- Test scan, stop, restart, repair, undo, and export workflows
-
----
-
-# 📜 License
-
-MIT
+The regular GitHub workflow tests source code without publishing a frozen
+binary. The separate `build-windows.yml` workflow is manual-only and creates a
+one-folder Windows x64 ZIP plus a SHA-256 checksum. Its package includes the
+runtime configuration, applicable license texts, application source, and a
+source-commit record. It uploads an Actions artifact but does not create or
+modify a GitHub Release.

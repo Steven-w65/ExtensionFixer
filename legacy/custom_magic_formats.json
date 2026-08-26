@@ -1,0 +1,138 @@
+{
+  "formats": [
+    {
+      "extension": "png",
+      "offset": 0,
+      "signature_hex": "89504E470D0A1A0A"
+    },
+    {
+      "extension": "jpg",
+      "offset": 0,
+      "signature_hex": "FFD8FF"
+    },
+    {
+      "extension": "gif",
+      "offset": 0,
+      "signature_hex": "474946383761"
+    },
+    {
+      "extension": "gif",
+      "offset": 0,
+      "signature_hex": "474946383961"
+    },
+    {
+      "extension": "bmp",
+      "offset": 0,
+      "signature_hex": "424D"
+    },
+    {
+      "extension": "ico",
+      "offset": 0,
+      "signature_hex": "00000100"
+    },
+    {
+      "extension": "webp",
+      "signatures": [
+        {
+          "offset": 0,
+          "signature_hex": "52494646"
+        },
+        {
+          "offset": 8,
+          "signature_hex": "57454250"
+        }
+      ]
+    },
+    {
+      "extension": "zip",
+      "offset": 0,
+      "signature_hex": "504B0304"
+    },
+    {
+      "extension": "zip",
+      "offset": 0,
+      "signature_hex": "504B0506"
+    },
+    {
+      "extension": "zip",
+      "offset": 0,
+      "signature_hex": "504B0708"
+    },
+    {
+      "extension": "pdf",
+      "offset": 0,
+      "signature_hex": "255044462D"
+    },
+    {
+      "extension": "rar",
+      "offset": 0,
+      "signature_hex": "526172211A0700"
+    },
+    {
+      "extension": "rar",
+      "offset": 0,
+      "signature_hex": "526172211A070100"
+    },
+    {
+      "extension": "7z",
+      "offset": 0,
+      "signature_hex": "377ABCAF271C"
+    },
+    {
+      "extension": "exe",
+      "offset": 0,
+      "signature_hex": "4D5A"
+    },
+    {
+      "extension": "mp4",
+      "offset": 4,
+      "signature_hex": "66747970"
+    },
+    {
+      "extension": "avi",
+      "signatures": [
+        {
+          "offset": 0,
+          "signature_hex": "52494646"
+        },
+        {
+          "offset": 8,
+          "signature_hex": "41564920"
+        }
+      ]
+    },
+    {
+      "extension": "wav",
+      "signatures": [
+        {
+          "offset": 0,
+          "signature_hex": "52494646"
+        },
+        {
+          "offset": 8,
+          "signature_hex": "57415645"
+        }
+      ]
+    },
+    {
+      "extension": "psd",
+      "offset": 0,
+      "signature_hex": "38425053"
+    },
+    {
+      "extension": "gz",
+      "offset": 0,
+      "signature_hex": "1F8B08"
+    },
+    {
+      "extension": "mp3",
+      "offset": 0,
+      "signature_hex": "494433"
+    },
+    {
+      "extension": "flac",
+      "offset": 0,
+      "signature_hex": "664C6143"
+    }
+  ]
+}

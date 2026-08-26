@@ -1,8 +1,10 @@
 {
   "last_folder": "",
   "recursive_scan": true,
-  "show_only_repair_items": true,
-  "enable_backup": false,
+  "show_only_repair_items": false,
+  "enable_backup": true,
+  "automatic_scan_after_repair": false,
+  "automatic_scan_after_undo": false,
   "duplicate_strategy": 1,
   "max_size_mb": "1024",
   "suffix_blacklist": ".exe, .dll"

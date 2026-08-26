@@ -1,0 +1,181 @@
+name: Build Windows application
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    name: Build Windows x64 package
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          architecture: "x64"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+
+      - name: Install runtime and build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-build.txt
+          python -m pip check
+
+      - name: Run regression tests
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          python -m unittest discover -v
+          python -m compileall -q main.py extension_fixer tests
+
+      - name: Build one-folder application
+        shell: pwsh
+        run: |
+          $entryPoint = (Resolve-Path -LiteralPath "main.py").Path
+          $icon = (Resolve-Path -LiteralPath "app.ico").Path
+          python -m PyInstaller `
+            --clean `
+            --noconfirm `
+            --onedir `
+            --windowed `
+            --name "ExtensionFixer" `
+            --icon $icon `
+            --distpath "dist" `
+            --workpath "build" `
+            --specpath "build-spec" `
+            $entryPoint
+
+      - name: Stage configuration, source, and licenses
+        shell: pwsh
+        run: |
+          $packageRoot = Join-Path $PWD "dist\ExtensionFixer"
+          $sourceRoot = Join-Path $packageRoot "source"
+          $licenseRoot = Join-Path $packageRoot "licenses"
+
+          if (-not (Test-Path -LiteralPath "$packageRoot\ExtensionFixer.exe" -PathType Leaf)) {
+            throw "PyInstaller did not create ExtensionFixer.exe."
+          }
+
+          New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
+          Copy-Item -LiteralPath "app.ico", "settings.json", "custom_magic_formats.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md" -Destination $packageRoot -Force
+          Copy-Item -LiteralPath "licenses" -Destination $packageRoot -Recurse -Force
+
+          $sourceArchive = Join-Path $env:RUNNER_TEMP "extension-fixer-source.zip"
+          git archive --format=zip --output=$sourceArchive HEAD -- main.py extension_fixer requirements.txt requirements-build.txt
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not archive the application source at the checked-out commit."
+          }
+          Expand-Archive -LiteralPath $sourceArchive -DestinationPath $sourceRoot -Force
+
+          $pythonRoot = python -c "import sys; print(sys.base_prefix)"
+          $pythonLicense = Join-Path $pythonRoot "LICENSE.txt"
+          if (-not (Test-Path -LiteralPath $pythonLicense -PathType Leaf)) {
+            throw "The CPython license file was not found at $pythonLicense."
+          }
+          Copy-Item -LiteralPath $pythonLicense -Destination "$licenseRoot\Python-3.12.txt" -Force
+
+          $pyInstallerLicense = python -c "from importlib.metadata import distribution; d=distribution('pyinstaller'); print(next(str(d.locate_file(f)) for f in d.files if f.name.lower() == 'copying.txt'))"
+          if (-not (Test-Path -LiteralPath $pyInstallerLicense -PathType Leaf)) {
+            throw "The PyInstaller license file was not found at $pyInstallerLicense."
+          }
+          Copy-Item -LiteralPath $pyInstallerLicense -Destination "$licenseRoot\PyInstaller-COPYING.txt" -Force
+
+          @(
+            "Extension Fixer Windows build"
+            "Repository: ${{ github.server_url }}/${{ github.repository }}"
+            "Source commit: ${{ github.sha }}"
+            "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ) | Set-Content -LiteralPath "$packageRoot\SOURCE_COMMIT.txt" -Encoding utf8
+
+      - name: Smoke-test packaged application
+        shell: pwsh
+        run: |
+          $packageRoot = Join-Path $PWD "dist\ExtensionFixer"
+          $executable = Join-Path $packageRoot "ExtensionFixer.exe"
+          $requiredFiles = @(
+            $executable,
+            (Join-Path $packageRoot "settings.json"),
+            (Join-Path $packageRoot "custom_magic_formats.json"),
+            (Join-Path $packageRoot "LICENSE"),
+            (Join-Path $packageRoot "THIRD_PARTY_NOTICES.md"),
+            (Join-Path $packageRoot "licenses\LGPL-3.0.txt"),
+            (Join-Path $packageRoot "licenses\Python-3.12.txt"),
+            (Join-Path $packageRoot "licenses\PyInstaller-COPYING.txt"),
+            (Join-Path $packageRoot "source\main.py")
+          )
+          foreach ($requiredFile in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
+              throw "Required package file is missing: $requiredFile"
+            }
+          }
+
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $executable -WorkingDirectory $packageRoot -PassThru
+            if ($process.WaitForExit(4000)) {
+              throw "The packaged application exited during startup with code $($process.ExitCode)."
+            }
+          }
+          finally {
+            if ($null -ne $process -and -not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+              $process.WaitForExit()
+            }
+          }
+
+      - name: Create ZIP and checksum
+        shell: pwsh
+        run: |
+          $archive = Join-Path $PWD "dist\ExtensionFixer-Windows-x64.zip"
+          Compress-Archive -LiteralPath "dist\ExtensionFixer" -DestinationPath $archive -CompressionLevel Optimal
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($archive)
+          try {
+            $entries = @($zip.Entries | ForEach-Object { $_.FullName.Replace("\", "/") })
+            $requiredEntries = @(
+              "ExtensionFixer/ExtensionFixer.exe",
+              "ExtensionFixer/settings.json",
+              "ExtensionFixer/custom_magic_formats.json",
+              "ExtensionFixer/licenses/Python-3.12.txt",
+              "ExtensionFixer/source/main.py"
+            )
+            foreach ($requiredEntry in $requiredEntries) {
+              if ($requiredEntry -notin $entries) {
+                throw "Required ZIP entry is missing: $requiredEntry"
+              }
+            }
+          }
+          finally {
+            $zip.Dispose()
+          }
+
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  ExtensionFixer-Windows-x64.zip" | Set-Content -LiteralPath "$archive.sha256" -Encoding ascii
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v7
+        with:
+          name: ExtensionFixer-Windows-x64-${{ github.sha }}
+          path: |
+            dist/ExtensionFixer-Windows-x64.zip
+            dist/ExtensionFixer-Windows-x64.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

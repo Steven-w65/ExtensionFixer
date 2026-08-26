@@ -5,3 +5,8 @@ __pycache__/
 
 # Runtime recovery state is created by the application.
 operation_log.json
+
+# Local packaging output.
+build/
+dist/
+*.spec

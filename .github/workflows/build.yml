@@ -1,11 +1,12 @@
-name: Build ExtensionFixer
+name: Test ExtensionFixer
 
 on:
   push:
+  pull_request:
   workflow_dispatch:
 
 jobs:
-  build:
+  test:
     runs-on: windows-latest
 
     steps:
@@ -17,21 +18,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install PyInstaller
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller
+          python -m pip install -r requirements.txt
 
-      - name: Build ExtensionFixer
+      - name: Run regression tests
+        shell: pwsh
         run: |
-          pyinstaller --onefile --windowed --name ExtensionFixer --icon=app.ico --add-data "app.ico;." main.py
-
-      - name: Copy configuration
-        run: |
-          copy custom_magic_formats.json dist\custom_magic_formats.json
-
-      - name: Upload build
-        uses: actions/upload-artifact@v6
-        with:
-          name: ExtensionFixer-Windows
-          path: dist\
+          $env:QT_QPA_PLATFORM = "offscreen"
+          python -m unittest discover -v
