@@ -79,7 +79,7 @@ class ReleaseAssetTestCase(unittest.TestCase):
         self.assertEqual(["PyInstaller==6.22.2"], build_requirements)
 
         test_workflow = (
-            self.release_root / ".github" / "workflows" / "build.yml"
+            self.release_root / ".github" / "workflows" / "test.yml"
         ).read_text(encoding="utf-8")
         self.assertNotIn("pyinstaller", test_workflow.lower())
         self.assertNotIn("upload-artifact", test_workflow.lower())

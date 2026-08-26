@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Steven-w65/ExtensionFixer/actions/workflows/build.yml"><img alt="Tests" src="https://github.com/Steven-w65/ExtensionFixer/actions/workflows/build.yml/badge.svg"></a>
+  <a href="https://github.com/Steven-w65/ExtensionFixer/actions/workflows/test.yml"><img alt="Tests" src="https://github.com/Steven-w65/ExtensionFixer/actions/workflows/test.yml/badge.svg"></a>
   <img alt="Version 2.0.0" src="https://img.shields.io/badge/version-2.0.0-2563EB">
   <img alt="Python 3.10 or newer" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white">
   <img alt="PyQt6" src="https://img.shields.io/badge/GUI-PyQt6-41CD52?logo=qt&logoColor=white">
@@ -267,7 +267,7 @@ large-list model behavior, checkbox input, conflict strategies, backups, repair
 integrity checks, protected operation logs, latest/all undo, CSV export, worker
 shutdown, and the complete main-window lifecycle.
 
-The regular [**Test ExtensionFixer**](https://github.com/Steven-w65/ExtensionFixer/actions/workflows/build.yml)
+The regular [**Test ExtensionFixer**](https://github.com/Steven-w65/ExtensionFixer/actions/workflows/test.yml)
 workflow runs automatically on pushes and pull requests. It tests the source but
 does not build or publish an executable.
 
