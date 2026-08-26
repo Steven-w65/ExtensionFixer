@@ -40,6 +40,30 @@ class FileOperations:
     def path_exists(path: Path | str) -> bool:
         return os.path.lexists(path)
 
+    @staticmethod
+    def relative_path_within(path: Path, root: Path) -> Path:
+        """Return a safe relative path after resolving the existing parent.
+
+        Windows may represent the same directory with either a long path or an
+        8.3 short-path alias (for example ``runneradmin`` and ``RUNNER~1``).
+        Purely lexical ``Path.relative_to()`` rejects those equivalent paths.
+        Resolving the parent both handles aliases and prevents a linked parent
+        directory from escaping the selected scan root.
+        """
+        resolved_root = root.resolve()
+        resolved_parent = path.parent.resolve()
+        try:
+            relative_parent = resolved_parent.relative_to(resolved_root)
+        except ValueError as error:
+            raise ValueError(f"Path is outside the selected folder: {path}") from error
+        return relative_parent / path.name
+
+    @classmethod
+    def canonical_path_within(cls, path: Path, root: Path) -> Path:
+        """Return *path* with a canonical, root-contained parent directory."""
+        relative = cls.relative_path_within(path, root)
+        return root.resolve() / relative
+
     def unique_id(self) -> str:
         self._counter += 1
         return f"{time.time_ns()}_{os.getpid()}_{self._counter}"
@@ -103,8 +127,8 @@ class FileOperations:
 
     def backup_file(self, source: Path, root: Path, backup_root: Path) -> tuple[bool, str]:
         try:
-            relative = source.relative_to(root)
-        except ValueError:
+            relative = self.relative_path_within(source, root)
+        except (OSError, RuntimeError, ValueError):
             return False, f"Source is outside the selected folder: {source}"
         target = backup_root / relative
         temporary = target.with_name(f".{target.name}.{os.getpid()}.partial")
@@ -206,13 +230,13 @@ class FileOperations:
 
         for record, source, target in planned:
             try:
-                resolved_parent = source.parent.resolve()
-                if not resolved_parent.is_relative_to(root):
-                    raise OSError(f"Source is outside the selected folder: {source}")
                 if source.is_symlink():
                     record["status"] = "Skipped: symbolic link"
                     skipped += 1
                     continue
+                source = self.canonical_path_within(source, root)
+                target = source.parent / target.name
+                record["planned_path"] = str(target)
                 if source.suffix.lower() in active_blacklist:
                     record["status"] = "Skipped: blacklisted extension"
                     skipped += 1
@@ -270,14 +294,14 @@ class FileOperations:
 
                 record.update({
                     "path": str(target),
-                    "relative_path": str(target.relative_to(root)),
+                    "relative_path": str(self.relative_path_within(target, root)),
                     "file_name": target.name,
                     "current_extension": target.suffix.lower(),
                     "status": "Repaired successfully",
                 })
                 renamed += 1
                 logger(f"Renamed: {source.name} -> {target.name}")
-            except OSError as error:
+            except (OSError, RuntimeError, ValueError) as error:
                 record["status"] = "Error: rename failed"
                 record["error"] = str(error)
                 failed += 1
@@ -318,14 +342,11 @@ class FileOperations:
         if (
             not original.is_absolute()
             or not renamed.is_absolute()
-            or original.parent != renamed.parent
-            or original == renamed
+            or os.path.normcase(original.name) == os.path.normcase(renamed.name)
         ):
             return "Blocked", "Unsafe or malformed operation-log entry"
         if root is None or not root.is_absolute():
             return "Blocked", "Missing or invalid recorded scan folder"
-        if not original.is_relative_to(root) or not renamed.is_relative_to(root):
-            return "Blocked", "Path is outside the recorded scan folder"
         try:
             resolved_root = root.resolve()
             resolved_original_parent = original.parent.resolve()
@@ -337,6 +358,8 @@ class FileOperations:
             or not resolved_renamed_parent.is_relative_to(resolved_root)
         ):
             return "Blocked", "Resolved path is outside the recorded scan folder"
+        if resolved_original_parent != resolved_renamed_parent:
+            return "Blocked", "Original and renamed paths use different folders"
         if original.is_symlink() or renamed.is_symlink():
             return "Blocked", "Symbolic links cannot be restored"
 

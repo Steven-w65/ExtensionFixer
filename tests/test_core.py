@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import csv
+import ctypes
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -178,6 +180,49 @@ class CoreTestCase(unittest.TestCase):
         self.assertEqual((1, 0, ""), operations.undo_batch(batch_id, lambda _message: None))
         self.assertEqual(content, source.read_bytes())
         self.assertFalse(target.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows short paths are Windows-specific")
+    def test_windows_short_path_alias_can_repair_backup_and_undo(self):
+        long_root = self.root / "Long Temporary Repair Directory"
+        long_root.mkdir()
+
+        buffer_size = 32768
+        buffer = ctypes.create_unicode_buffer(buffer_size)
+        copied = ctypes.windll.kernel32.GetShortPathNameW(
+            str(long_root), buffer, buffer_size
+        )
+        if not copied or copied >= buffer_size:
+            self.skipTest("Windows could not provide an 8.3 short-path alias")
+        short_root = Path(buffer.value)
+        if os.path.normcase(str(short_root)) == os.path.normcase(str(long_root)):
+            self.skipTest("8.3 short-path aliases are disabled on this volume")
+
+        source = short_root / "aliased.bad"
+        content = b"alias-safe content"
+        source.write_bytes(content)
+        operations = FileOperations(self.root / "alias_operation_log.json")
+        result = operations.rename_records(
+            [self._repair_record(source)],
+            long_root,
+            FileOperations.STRATEGIES[1],
+            True,
+            1024,
+            lambda _message: None,
+        )
+
+        target = long_root / "aliased.png"
+        self.assertEqual(1, result["renamed"])
+        self.assertEqual(0, result["failed"])
+        self.assertEqual(content, target.read_bytes())
+        backups = list((long_root / "backup").rglob("aliased.bad"))
+        self.assertEqual(1, len(backups))
+        self.assertEqual(content, backups[0].read_bytes())
+
+        batch_id, preview, error = operations.preview_latest_batch()
+        self.assertEqual("", error)
+        self.assertEqual("Ready", preview[0]["status"])
+        self.assertEqual((1, 0, ""), operations.undo_batch(batch_id, lambda _: None))
+        self.assertEqual(content, (long_root / "aliased.bad").read_bytes())
 
     def test_corrupt_log_blocks_repair(self):
         source = self.root / "blocked.bad"

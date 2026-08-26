@@ -139,43 +139,11 @@ jobs:
             }
           }
 
-      - name: Create ZIP and checksum
-        shell: pwsh
-        run: |
-          $archive = Join-Path $PWD "dist\ExtensionFixer-Windows-x64.zip"
-          Compress-Archive -LiteralPath "dist\ExtensionFixer" -DestinationPath $archive -CompressionLevel Optimal
-
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [System.IO.Compression.ZipFile]::OpenRead($archive)
-          try {
-            $entries = @($zip.Entries | ForEach-Object { $_.FullName.Replace("\", "/") })
-            $requiredEntries = @(
-              "ExtensionFixer/ExtensionFixer.exe",
-              "ExtensionFixer/settings.json",
-              "ExtensionFixer/custom_magic_formats.json",
-              "ExtensionFixer/licenses/Python-3.12.txt",
-              "ExtensionFixer/source/main.py"
-            )
-            foreach ($requiredEntry in $requiredEntries) {
-              if ($requiredEntry -notin $entries) {
-                throw "Required ZIP entry is missing: $requiredEntry"
-              }
-            }
-          }
-          finally {
-            $zip.Dispose()
-          }
-
-          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  ExtensionFixer-Windows-x64.zip" | Set-Content -LiteralPath "$archive.sha256" -Encoding ascii
-
       - name: Upload Windows package
         uses: actions/upload-artifact@v7
         with:
-          name: ExtensionFixer-Windows-x64-${{ github.sha }}
-          path: |
-            dist/ExtensionFixer-Windows-x64.zip
-            dist/ExtensionFixer-Windows-x64.zip.sha256
+          name: ExtensionFixer-Windows-x64
+          path: dist/ExtensionFixer/
           if-no-files-found: error
-          compression-level: 0
+          compression-level: 6
           retention-days: 14

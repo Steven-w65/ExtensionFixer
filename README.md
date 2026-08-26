@@ -70,8 +70,8 @@ the complete main-window lifecycle.
 Open **Actions → Build Windows application → Run workflow** in the GitHub
 repository. The manual workflow tests the checked-out commit, builds the x64
 one-folder application, runs a startup smoke test, and uploads
-`ExtensionFixer-Windows-x64.zip` together with its SHA-256 checksum. The
-artifact is retained for 14 days. The workflow does not create a GitHub Release.
+`ExtensionFixer-Windows-x64.zip`. The artifact is retained for 14 days. The
+workflow does not create a GitHub Release.
 
 ## Safety model
 
@@ -102,7 +102,6 @@ in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and [`licenses/`](licenses
 
 The regular GitHub workflow tests source code without publishing a frozen
 binary. The separate `build-windows.yml` workflow is manual-only and creates a
-one-folder Windows x64 ZIP plus a SHA-256 checksum. Its package includes the
-runtime configuration, applicable license texts, application source, and a
-source-commit record. It uploads an Actions artifact but does not create or
-modify a GitHub Release.
+one-folder Windows x64 ZIP. Its package includes the runtime configuration,
+applicable license texts, application source, and a source-commit record. It
+uploads an Actions artifact but does not create or modify a GitHub Release.
