@@ -321,7 +321,3 @@ BSD-2-Clause. Complete attribution and bundled license information are available
 in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and [`licenses/`](licenses/).
 
 ---
-
-<p align="center">
-  <strong>Inspect first. Preview every change. Rename safely.</strong>
-</p>
