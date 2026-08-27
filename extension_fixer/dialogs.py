@@ -10,6 +10,7 @@ import json
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -19,6 +20,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QHeaderView,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -30,6 +32,93 @@ from PyQt6.QtWidgets import (
 from .core import ApplicationSettings, MagicNumberDetector
 from .core.operations import FileOperations
 from .models import ModernCheckBox
+
+
+class RepairPreviewDialog(QDialog):
+    """Large, read-only table showing every checked repair candidate."""
+
+    def __init__(
+        self,
+        rows: list[dict],
+        planned: int,
+        skipped: int,
+        conflicts: int,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Repair Preview")
+        self.setObjectName("repairPreviewDialog")
+        self.setMinimumSize(860, 480)
+
+        # Use more space on large displays while remaining suitable for laptops.
+        available = self.screen().availableGeometry()
+        self.resize(
+            min(1100, max(860, int(available.width() * 0.72))),
+            min(680, max(480, int(available.height() * 0.68))),
+        )
+
+        heading = QLabel("Repair Preview", objectName="appTitle")
+        heading.setStyleSheet("font-size: 17pt;")
+        hint = QLabel(
+            "Review every checked file and its planned filename. "
+            "No files are changed from this window.",
+            objectName="dialogHint",
+        )
+        hint.setWordWrap(True)
+        self.summary_label = QLabel(
+            f"Planned: {planned}   ·   Skipped: {skipped}   ·   "
+            f"Conflicts: {conflicts}",
+            objectName="previewSummary",
+        )
+
+        self.table = QTableWidget(len(rows), 3)
+        self.table.setObjectName("previewTable")
+        self.table.setHorizontalHeaderLabels(
+            ("Selected File", "New Filename", "Status")
+        )
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(34)
+
+        status_colors = {
+            "Planned": QColor("#EAF6EC"),
+            "Conflict resolved": QColor("#E8F1FD"),
+            "Skipped": QColor("#FFF1CC"),
+        }
+        for row_index, row in enumerate(rows):
+            values = (
+                row.get("selected_file", ""),
+                row.get("new_filename", "—"),
+                row.get("status", "Planned"),
+            )
+            background = status_colors.get(str(values[2]), QColor("#FFFFFF"))
+            for column, value in enumerate(values):
+                cell = QTableWidgetItem(str(value))
+                cell.setToolTip(str(value))
+                cell.setBackground(background)
+                self.table.setItem(row_index, column, cell)
+
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setObjectName("primaryButton")
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(12)
+        layout.addWidget(heading)
+        layout.addWidget(hint)
+        layout.addWidget(self.summary_label)
+        layout.addWidget(self.table, 1)
+        layout.addWidget(buttons)
 
 
 class SettingsDialog(QDialog):
@@ -184,10 +273,6 @@ class SettingsDialog(QDialog):
         return True
 
     def _save(self):
-        success, message = self.detector.save_text(self.format_editor.toPlainText())
-        if not success:
-            QMessageBox.warning(self, "Formats Not Saved", message)
-            return
         settings = {
             "last_folder": str(self.parent().folder_edit.text()).strip(),
             "recursive_scan": self.recursive.isChecked(),
@@ -199,7 +284,9 @@ class SettingsDialog(QDialog):
             "max_size_mb": f"{self.size_limit.value():g}",
             "suffix_blacklist": self.blacklist.text().strip(),
         }
-        saved, error = self.store.save(settings)
+        saved, error = self.store.save_with_formats(
+            settings, self.detector, self.format_editor.toPlainText()
+        )
         if not saved:
             QMessageBox.critical(self, "Settings Not Saved", error)
             return

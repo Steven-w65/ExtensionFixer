@@ -15,8 +15,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtTest import QSignalSpy, QTest
-from PyQt6.QtWidgets import QApplication, QCheckBox, QMessageBox
+from PyQt6.QtWidgets import QAbstractItemView, QApplication, QCheckBox, QMessageBox
 
+from extension_fixer import dialogs
 from extension_fixer.core import FileScanner, MagicNumberDetector
 from extension_fixer.dialogs import SettingsDialog, UndoPreviewDialog
 from extension_fixer.main_window import MainWindow
@@ -266,6 +267,53 @@ class QtTestCase(unittest.TestCase):
             dialog.close()
             window.close()
 
+    def test_repair_preview_dialog_is_large_and_lists_checked_files(self):
+        self.assertTrue(
+            hasattr(dialogs, "RepairPreviewDialog"),
+            "Repair preview must use a dedicated readable dialog",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._prepare_window_folder(root, 0)
+            window = MainWindow(root)
+            first = make_record(1)
+            first["path"] = "C:/scan/photos/holiday-photo.wrong"
+            first["relative_path"] = "photos/holiday-photo.wrong"
+            second = make_record(2)
+            second["path"] = "C:/scan/archives/package.unknown"
+            second["relative_path"] = "archives/package.unknown"
+            window.model.append_records([first, second])
+            window.model.set_paths_checked({first["path"], second["path"]}, True)
+
+            captured_dialogs = []
+
+            def capture_dialog(dialog):
+                captured_dialogs.append(dialog)
+                return dialog.DialogCode.Rejected
+
+            with patch.object(dialogs.RepairPreviewDialog, "exec", capture_dialog):
+                window.preview_repairs()
+
+            self.assertEqual(1, len(captured_dialogs))
+            preview = captured_dialogs[0]
+            self.assertGreaterEqual(preview.minimumWidth(), 860)
+            self.assertGreaterEqual(preview.minimumHeight(), 480)
+            self.assertEqual(2, preview.table.rowCount())
+            self.assertEqual(3, preview.table.columnCount())
+            self.assertEqual(
+                ["Selected File", "New Filename", "Status"],
+                [preview.table.horizontalHeaderItem(column).text() for column in range(3)],
+            )
+            self.assertEqual("photos/holiday-photo.wrong", preview.table.item(0, 0).text())
+            self.assertEqual("holiday-photo.png", preview.table.item(0, 1).text())
+            self.assertEqual("Planned", preview.table.item(0, 2).text())
+            self.assertIn("Planned: 2", preview.summary_label.text())
+            self.assertEqual(
+                QAbstractItemView.EditTrigger.NoEditTriggers,
+                preview.table.editTriggers(),
+            )
+            window.close()
+
     def test_window_stop_waits_for_confirmed_thread_exit(self):
         class SlowScanner:
             @staticmethod
@@ -405,6 +453,46 @@ class QtTestCase(unittest.TestCase):
             self.assertEqual("pdf", rules[0][0])
             window.close()
 
+    def test_settings_dialog_rolls_back_formats_when_settings_save_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._prepare_window_folder(root, 0)
+            window = MainWindow(root)
+            original_configuration = window.detector.config_path.read_bytes()
+            original_rules = list(window.detector.formats)
+            dialog = SettingsDialog(
+                window.settings, window.settings_store, window.detector, window
+            )
+            dialog.format_editor.setPlainText(json.dumps({"formats": [{
+                "extension": "pdf", "offset": 0, "signature_hex": "25504446"
+            }]}))
+
+            real_replace = os.replace
+            replace_calls = 0
+
+            def fail_second_commit(source, destination):
+                nonlocal replace_calls
+                replace_calls += 1
+                if replace_calls == 2:
+                    raise OSError("forced settings commit failure")
+                return real_replace(source, destination)
+
+            with (
+                patch(
+                    "extension_fixer.core.settings.os.replace",
+                    side_effect=fail_second_commit,
+                ),
+                patch("extension_fixer.dialogs.QMessageBox.critical"),
+            ):
+                dialog._save()
+
+            self.assertEqual(original_configuration, window.detector.config_path.read_bytes())
+            self.assertEqual(original_rules, window.detector.formats)
+            self.assertIsNone(dialog.saved_settings)
+            self.assertEqual(SettingsDialog.DialogCode.Rejected, dialog.result())
+            dialog.close()
+            window.close()
+
     def test_automatic_scan_checkboxes_control_completion_handlers(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -427,6 +515,73 @@ class QtTestCase(unittest.TestCase):
                 window._undo_finished((1, 0, ""))
                 start_scan.assert_called_once_with()
             window.close()
+
+    def test_automatic_scan_after_undo_rejects_an_empty_folder_field(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._prepare_window_folder(root, 0)
+            window = MainWindow(root)
+            window.settings["automatic_scan_after_undo"] = True
+            window.folder_edit.clear()
+            try:
+                with (
+                    patch("extension_fixer.main_window.QMessageBox.information"),
+                    patch("extension_fixer.main_window.QMessageBox.warning"),
+                ):
+                    window._undo_finished((1, 0, ""))
+                self.assertIsNone(window.scan_thread)
+                self.assertIn("Scan manually", window.statusBar().currentMessage())
+            finally:
+                if window.scan_thread is not None:
+                    window.stop_scan()
+                    self._wait_until(lambda: window.scan_thread is None)
+                window.close()
+
+    def test_automatic_scan_after_undo_requires_a_restored_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scan = self._prepare_window_folder(root, 0)
+            window = MainWindow(root)
+            window.settings["automatic_scan_after_undo"] = True
+            window.folder_edit.setText(str(scan))
+            try:
+                with (
+                    patch("extension_fixer.main_window.QMessageBox.information"),
+                    patch("extension_fixer.main_window.QMessageBox.warning"),
+                ):
+                    window._undo_finished((0, 1, ""))
+                self.assertIsNone(window.scan_thread)
+                self.assertIn("Scan manually", window.statusBar().currentMessage())
+            finally:
+                if window.scan_thread is not None:
+                    window.stop_scan()
+                    self._wait_until(lambda: window.scan_thread is None)
+                window.close()
+
+    def test_automatic_scan_after_undo_rejects_an_unreadable_folder(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scan = self._prepare_window_folder(root, 0)
+            window = MainWindow(root)
+            window.settings["automatic_scan_after_undo"] = True
+            window.folder_edit.setText(str(scan))
+            try:
+                with (
+                    patch(
+                        "extension_fixer.core.scanner.os.scandir",
+                        side_effect=PermissionError("access denied"),
+                    ),
+                    patch("extension_fixer.main_window.QMessageBox.information"),
+                    patch("extension_fixer.main_window.QMessageBox.warning"),
+                ):
+                    window._undo_finished((1, 0, ""))
+                self.assertIsNone(window.scan_thread)
+                self.assertIn("Scan manually", window.statusBar().currentMessage())
+            finally:
+                if window.scan_thread is not None:
+                    window.stop_scan()
+                    self._wait_until(lambda: window.scan_thread is None)
+                window.close()
 
     def test_check_all_visible_respects_repair_filter(self):
         with tempfile.TemporaryDirectory() as temporary:

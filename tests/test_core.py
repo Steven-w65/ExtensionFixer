@@ -297,6 +297,32 @@ class CoreTestCase(unittest.TestCase):
         self.assertEqual("Blocked", changed_preview[0]["status"])
         self.assertIn("size changed", changed_preview[0]["detail"].lower())
 
+    def test_restore_all_preview_simulates_chained_renames(self):
+        """Preview must match the reverse-order state transitions used by undo."""
+        operations = FileOperations(self.root / "operation_log.json")
+        original = self.root / "chain.bad"
+        original.write_bytes(b"chain")
+
+        first = operations.rename_records(
+            [self._repair_record(original, ".png")], self.root,
+            FileOperations.STRATEGIES[1], False, 1024, lambda _message: None,
+        )
+        self.assertEqual(1, first["renamed"])
+        intermediate = self.root / "chain.png"
+        second = operations.rename_records(
+            [self._repair_record(intermediate, ".jpg")], self.root,
+            FileOperations.STRATEGIES[1], False, 1024, lambda _message: None,
+        )
+        self.assertEqual(1, second["renamed"])
+
+        preview, error = operations.preview_all_operations()
+        self.assertEqual("", error)
+        self.assertEqual(["Ready", "Ready"], [item["status"] for item in preview])
+        self.assertEqual((2, 0, ""), operations.undo_batch(None, lambda _: None))
+        self.assertTrue(original.exists())
+        self.assertFalse(intermediate.exists())
+        self.assertFalse((self.root / "chain.jpg").exists())
+
     def test_undo_blocks_entries_without_a_recorded_scan_root(self):
         renamed = self.root / "unsafe.png"
         renamed.write_bytes(b"content")

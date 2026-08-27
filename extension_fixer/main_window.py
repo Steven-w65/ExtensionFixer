@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, Qt
@@ -33,7 +34,7 @@ from .core import (
     MagicNumberDetector,
     export_csv_report,
 )
-from .dialogs import SettingsDialog, UndoPreviewDialog
+from .dialogs import RepairPreviewDialog, SettingsDialog, UndoPreviewDialog
 from .models import (
     AggregateSelectionCheckBox,
     CenteredCheckBoxDelegate,
@@ -293,6 +294,21 @@ class MainWindow(QMainWindow):
         if folder:
             self.folder_edit.setText(folder)
 
+    @staticmethod
+    def _accessible_scan_root(folder_text: str) -> Path | None:
+        """Resolve a directory and verify that traversal can actually start."""
+        if not folder_text:
+            return None
+        try:
+            root = Path(folder_text).expanduser().resolve()
+            if not root.is_dir():
+                return None
+            with os.scandir(root):
+                pass
+            return root
+        except (OSError, RuntimeError, ValueError):
+            return None
+
     def open_settings(self):
         if self.settings_dialog is not None:
             self.settings_dialog.raise_()
@@ -312,15 +328,8 @@ class MainWindow(QMainWindow):
         if self.scan_thread is not None or self.operation_thread is not None:
             return
         folder_text = self.folder_edit.text().strip()
-        if not folder_text:
-            QMessageBox.warning(self, "Invalid Folder", "Select an existing folder first.")
-            return
-        try:
-            root = Path(folder_text).expanduser().resolve()
-            is_directory = root.is_dir()
-        except (OSError, RuntimeError, ValueError):
-            is_directory = False
-        if not is_directory:
+        root = self._accessible_scan_root(folder_text)
+        if root is None:
             QMessageBox.warning(self, "Invalid Folder", "Select an existing folder first.")
             return
         self.folder_edit.setText(str(root))
@@ -525,17 +534,41 @@ class MainWindow(QMainWindow):
         if error:
             QMessageBox.warning(self, "Preview Blocked", error)
             return
-        lines = [
-            f"{record['relative_path']}  →  {target.name}"
-            for record, _source, target in planned
-        ]
         skipped = len(records) - len(planned)
-        text = f"Planned: {len(planned)} · Skipped: {skipped} · Conflicts: {len(conflicts)}"
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("Repair Preview")
-        dialog.setIcon(QMessageBox.Icon.Information)
-        dialog.setText(text)
-        dialog.setDetailedText("\n".join(lines) if lines else "No files would be renamed.")
+        planned_targets = {
+            str(source): target for _record, source, target in planned
+        }
+        conflict_targets = set(conflicts)
+        rows = []
+        for record in records:
+            source = Path(str(record.get("path", "")))
+            target = planned_targets.get(str(source))
+            if target is None:
+                new_filename = "—"
+                status = "Skipped"
+            else:
+                new_filename = target.name
+                initial_target = source.with_suffix(
+                    str(record.get("detected_extension", ""))
+                )
+                status = (
+                    "Conflict resolved"
+                    if str(initial_target) in conflict_targets
+                    else "Planned"
+                )
+            rows.append({
+                "selected_file": str(record.get("relative_path", source.name)),
+                "new_filename": new_filename,
+                "status": status,
+            })
+
+        dialog = RepairPreviewDialog(
+            rows,
+            planned=len(planned),
+            skipped=skipped,
+            conflicts=len(conflicts),
+            parent=self,
+        )
         dialog.exec()
 
     def execute_repairs(self):
@@ -668,9 +701,11 @@ class MainWindow(QMainWindow):
 
     def _undo_finished(self, result):
         undone, failed, message = result
-        folder_is_valid = Path(self.folder_edit.text().strip()).is_dir()
+        folder_text = self.folder_edit.text().strip()
+        folder_is_valid = self._accessible_scan_root(folder_text) is not None
         auto_scan = (
             bool(self.settings.get("automatic_scan_after_undo", False))
+            and undone > 0
             and folder_is_valid
         )
         refresh_note = (

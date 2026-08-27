@@ -37,6 +37,15 @@ QLabel#metricsLabel {
 }
 QLabel#activityHint { color: #8492A6; font-size: 8.75pt; }
 QLabel#dialogHint { color: #64748B; font-size: 9.5pt; }
+QLabel#previewSummary {
+    color: #1E3A5F;
+    background: #EAF2FD;
+    border: 1px solid #C9DCF7;
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 9.5pt;
+    font-weight: 700;
+}
 
 QFrame#card, QFrame#resultsCard, QFrame#activityCard {
     background: #FFFFFF;

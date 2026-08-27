@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .detector import MagicNumberDetector
+
 
 class ApplicationSettings:
     """Load and save non-format application preferences."""
@@ -98,3 +100,99 @@ class ApplicationSettings:
             except OSError:
                 pass
             return False, str(error)
+
+    def save_with_formats(
+        self,
+        settings: dict[str, Any],
+        detector: MagicNumberDetector,
+        configuration_text: str,
+    ) -> tuple[bool, str]:
+        """Commit settings and format rules as one recoverable transaction.
+
+        Both replacement files are fully validated and staged before either
+        original is replaced. If the second replacement fails, the first is
+        restored from its byte-for-byte snapshot before this method returns.
+        """
+        try:
+            configuration = json.loads(configuration_text)
+        except json.JSONDecodeError as error:
+            return False, f"Invalid JSON: {error}"
+        if not isinstance(configuration, dict) or "formats" not in configuration:
+            return False, "Configuration must contain a 'formats' list."
+        parsed_formats, format_errors = detector.parse_configuration(configuration)
+        if format_errors:
+            return False, "Configuration was not accepted:\n" + "\n".join(format_errors)
+
+        try:
+            format_bytes = json.dumps(
+                configuration, ensure_ascii=False, indent=2
+            ).encode("utf-8")
+            settings_bytes = json.dumps(
+                settings, ensure_ascii=False, indent=2
+            ).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            return False, f"Could not serialize settings: {error}"
+
+        targets = (
+            (detector.config_path, format_bytes, "formats"),
+            (self.path, settings_bytes, "settings"),
+        )
+        staged: list[tuple[Path, Path, bytes | None, str]] = []
+        try:
+            for index, (target, payload, label) in enumerate(targets):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                snapshot = target.read_bytes() if target.exists() else None
+                temporary = target.with_name(
+                    f".{target.name}.{os.getpid()}.transaction-{index}.tmp"
+                )
+                staged.append((temporary, target, snapshot, label))
+                with temporary.open("wb") as handle:
+                    handle.write(payload)
+        except OSError as error:
+            for temporary, _target, _snapshot, _label in staged:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            return False, f"Could not stage settings transaction: {error}"
+
+        committed: list[tuple[Path, bytes | None, str]] = []
+        try:
+            for temporary, target, snapshot, label in staged:
+                os.replace(temporary, target)
+                committed.append((target, snapshot, label))
+        except OSError as error:
+            rollback_errors: list[str] = []
+            for target, snapshot, label in reversed(committed):
+                rollback_temporary = target.with_name(
+                    f".{target.name}.{os.getpid()}.rollback.tmp"
+                )
+                try:
+                    if snapshot is None:
+                        target.unlink(missing_ok=True)
+                    else:
+                        with rollback_temporary.open("wb") as handle:
+                            handle.write(snapshot)
+                        os.replace(rollback_temporary, target)
+                except OSError as rollback_error:
+                    rollback_errors.append(f"{label}: {rollback_error}")
+                finally:
+                    try:
+                        rollback_temporary.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+            for temporary, _target, _snapshot, _label in staged:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            message = f"Could not commit settings transaction: {error}"
+            if rollback_errors:
+                # Reload whatever is now on disk so detection never silently
+                # disagrees with a rollback that the filesystem rejected.
+                detector.load()
+                message += "\nRollback also failed: " + "; ".join(rollback_errors)
+            return False, message
+
+        detector.formats = parsed_formats
+        return True, f"Loaded {len(parsed_formats)} format rule(s)."

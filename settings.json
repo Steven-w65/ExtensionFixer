@@ -1,7 +1,7 @@
 {
   "last_folder": "",
   "recursive_scan": true,
-  "show_only_repair_items": false,
+  "show_only_repair_items": true,
   "enable_backup": true,
   "automatic_scan_after_repair": false,
   "automatic_scan_after_undo": false,

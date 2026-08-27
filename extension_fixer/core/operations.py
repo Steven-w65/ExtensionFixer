@@ -334,7 +334,33 @@ class FileOperations:
             item for item in operations if self.operation_batch_id(item) == batch_id
         ]
 
-    def inspect_undo_operation(self, operation: dict) -> tuple[str, str]:
+    @staticmethod
+    def _virtual_file(path: Path, virtual_files: dict[str, Path | None] | None) -> Path | None:
+        """Return the real file backing a logical path during undo simulation."""
+        try:
+            key_path = path.parent.resolve() / path.name
+        except (OSError, RuntimeError):
+            key_path = path
+        key = os.path.normcase(str(key_path))
+        if virtual_files is not None and key in virtual_files:
+            return virtual_files[key]
+        return path if FileOperations.path_exists(path) else None
+
+    @staticmethod
+    def _set_virtual_file(
+        path: Path, backing_file: Path | None, virtual_files: dict[str, Path | None]
+    ) -> None:
+        try:
+            key_path = path.parent.resolve() / path.name
+        except (OSError, RuntimeError):
+            key_path = path
+        virtual_files[os.path.normcase(str(key_path))] = backing_file
+
+    def inspect_undo_operation(
+        self,
+        operation: dict,
+        virtual_files: dict[str, Path | None] | None = None,
+    ) -> tuple[str, str]:
         original = Path(str(operation.get("source", "")))
         renamed = Path(str(operation.get("destination", "")))
         root_text = str(operation.get("root_folder", "")).strip()
@@ -360,11 +386,17 @@ class FileOperations:
             return "Blocked", "Resolved path is outside the recorded scan folder"
         if resolved_original_parent != resolved_renamed_parent:
             return "Blocked", "Original and renamed paths use different folders"
-        if original.is_symlink() or renamed.is_symlink():
+        original_file = self._virtual_file(original, virtual_files)
+        renamed_file = self._virtual_file(renamed, virtual_files)
+        if (
+            original_file is not None and original_file.is_symlink()
+        ) or (
+            renamed_file is not None and renamed_file.is_symlink()
+        ):
             return "Blocked", "Symbolic links cannot be restored"
 
-        source_exists = self.path_exists(original)
-        destination_exists = self.path_exists(renamed)
+        source_exists = original_file is not None
+        destination_exists = renamed_file is not None
         if source_exists and not destination_exists:
             return "Stale", "Rename did not complete; log entry can be cleared"
         if not destination_exists:
@@ -375,16 +407,25 @@ class FileOperations:
         recorded_size = operation.get("size_bytes")
         if isinstance(recorded_size, int):
             try:
-                if renamed.stat().st_size != recorded_size:
+                if renamed_file is None or renamed_file.stat().st_size != recorded_size:
                     return "Blocked", "Renamed file size changed after repair"
             except OSError as error:
                 return "Blocked", f"Cannot inspect renamed file: {error}"
         return "Ready", "Ready to restore original filename"
 
-    def _preview(self, operations: list[dict], include_batch: bool) -> list[dict]:
+    def _preview(
+        self, operations: list[dict], include_batch: bool, simulate_undo: bool = False
+    ) -> list[dict]:
         preview: list[dict] = []
+        virtual_files: dict[str, Path | None] | None = {} if simulate_undo else None
         for operation in reversed(operations):
-            status, detail = self.inspect_undo_operation(operation)
+            status, detail = self.inspect_undo_operation(operation, virtual_files)
+            if virtual_files is not None and status == "Ready":
+                original = Path(str(operation.get("source", "")))
+                renamed = Path(str(operation.get("destination", "")))
+                backing_file = self._virtual_file(renamed, virtual_files)
+                self._set_virtual_file(original, backing_file, virtual_files)
+                self._set_virtual_file(renamed, None, virtual_files)
             item = {
                 "operation": operation,
                 "current_name": Path(str(operation.get("destination", ""))).name,
@@ -411,7 +452,7 @@ class FileOperations:
             return [], self.last_log_error
         if not operations:
             return [], "No recorded rename operations are available to undo."
-        return self._preview(operations, True), ""
+        return self._preview(operations, True, simulate_undo=True), ""
 
     def undo_batch(self, batch_id: str | None, logger: Logger) -> tuple[int, int, str]:
         operations = self.load_operations()
