@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from . import __version__
 from .core import (
     ApplicationSettings,
     FileOperations,
@@ -116,7 +117,7 @@ class MainWindow(QMainWindow):
         brand.addWidget(subtitle)
         header.addLayout(brand)
         header.addStretch()
-        version = QLabel("v2.0", objectName="versionBadge")
+        version = QLabel(f"v{__version__}", objectName="versionBadge")
         header.addWidget(version)
         self.settings_button = QPushButton("Settings")
         self.settings_button.setObjectName("quietButton")

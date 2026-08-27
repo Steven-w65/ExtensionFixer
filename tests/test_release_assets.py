@@ -45,7 +45,7 @@ class ReleaseAssetTestCase(unittest.TestCase):
         ).load()
         self.assertEqual(set(ApplicationSettings.DEFAULTS), set(loaded))
         self.assertIn(loaded["duplicate_strategy"], (1, 2, 3))
-        self.assertEqual("2.0.0", __version__)
+        self.assertEqual("2.0.1", __version__)
         self.assertEqual(self.release_root, application_directory())
         frozen_executable = self.release_root / "dist" / "ExtensionFixer.exe"
         with (

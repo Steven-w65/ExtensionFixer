@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/Steven-w65/ExtensionFixer/actions/workflows/test.yml"><img alt="Tests" src="https://github.com/Steven-w65/ExtensionFixer/actions/workflows/test.yml/badge.svg"></a>
-  <img alt="Version 2.0.0" src="https://img.shields.io/badge/version-2.0.0-2563EB">
+  <img alt="Version 2.0.1" src="https://img.shields.io/badge/version-2.0.1-2563EB">
   <img alt="Python 3.10 or newer" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white">
   <img alt="PyQt6" src="https://img.shields.io/badge/GUI-PyQt6-41CD52?logo=qt&logoColor=white">
   <img alt="Windows x64 build" src="https://img.shields.io/badge/build-Windows%20x64-0078D4?logo=windows11&logoColor=white">

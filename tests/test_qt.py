@@ -15,9 +15,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtTest import QSignalSpy, QTest
-from PyQt6.QtWidgets import QAbstractItemView, QApplication, QCheckBox, QMessageBox
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QCheckBox,
+    QLabel,
+    QMessageBox,
+)
 
-from extension_fixer import dialogs
+from extension_fixer import __version__, dialogs
 from extension_fixer.core import FileScanner, MagicNumberDetector
 from extension_fixer.dialogs import SettingsDialog, UndoPreviewDialog
 from extension_fixer.main_window import MainWindow
@@ -265,6 +271,16 @@ class QtTestCase(unittest.TestCase):
                 dialog.auto_scan_repair.style().objectName(),
             )
             dialog.close()
+            window.close()
+
+    def test_window_version_badge_matches_package_version(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._prepare_window_folder(root, 0)
+            window = MainWindow(root)
+            badge = window.findChild(QLabel, "versionBadge")
+            self.assertIsNotNone(badge)
+            self.assertEqual(f"v{__version__}", badge.text())
             window.close()
 
     def test_repair_preview_dialog_is_large_and_lists_checked_files(self):
